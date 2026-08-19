@@ -343,6 +343,19 @@ footer{border-top:1px solid var(--line); padding:60px 0 30px; position:relative;
   .hero-actions .btn{width:100%;}
   .row2{grid-template-columns:1fr;}
 }
+/* ---------- settings modal ---------- */
+.modal-overlay{position:fixed; inset:0; z-index:200; display:none; align-items:center; justify-content:center; padding:20px;
+  background:rgba(0,0,0,.65); backdrop-filter:blur(4px);}
+.modal-overlay.open{display:flex;}
+.modal-box{width:100%; max-width:440px; background:var(--bg-elev); border:1px solid var(--line-strong); border-radius:18px; padding:26px;
+  box-shadow:0 24px 60px -12px rgba(0,0,0,.7);}
+.modal-box h3{font-size:17px; font-weight:700; margin-bottom:6px;}
+.modal-box p.hint{font-size:12.5px; color:var(--text-dim); line-height:1.6; margin-bottom:16px;}
+.modal-box .field{margin-bottom:14px;}
+.modal-box .modal-actions{display:flex; gap:10px; margin-top:6px;}
+.modal-box .status-line{font-size:12px; margin-top:10px; color:var(--text-faint); display:flex; align-items:center; gap:6px;}
+.modal-box .status-dot{width:7px; height:7px; border-radius:50%; background:var(--text-faint); flex:none;}
+.modal-box .status-dot.ok{background:var(--cyan); box-shadow:0 0 6px var(--cyan);}
 </style>
 </head>
 <body>
@@ -374,6 +387,7 @@ footer{border-top:1px solid var(--line); padding:60px 0 30px; position:relative;
       <a href="#pricing">Pricing</a>
     </nav>
     <div class="nav-right">
+      <button class="icon-btn" title="Hugging Face API Key" id="apiKeyBtn" onclick="openSettings()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></button>
       <button class="icon-btn" title="Search" onclick="toast('Search — press / to focus anywhere')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
       <button class="icon-btn" title="Notifications" onclick="toast('3 new notifications')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></button>
       <div class="credits-pill"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg> 248 credits</div>
@@ -483,16 +497,16 @@ footer{border-top:1px solid var(--line); padding:60px 0 30px; position:relative;
           <div class="row2">
             <div class="field">
               <label>Aspect ratio</label>
-              <select><option>1:1 Square</option><option>16:9 Widescreen</option><option>9:16 Portrait</option><option>4:5 Social</option><option>3:2 Classic</option></select>
+              <select id="aspectSelect"><option>1:1 Square</option><option>16:9 Widescreen</option><option>9:16 Portrait</option><option>4:5 Social</option><option>3:2 Classic</option></select>
             </div>
             <div class="field">
               <label>Resolution</label>
-              <select><option>1024 · Standard</option><option>2048 · 2K</option><option>3840 · 4K</option><option>7680 · 8K</option></select>
+              <select id="resSelect"><option>1024 · Standard</option><option>2048 · 2K</option><option>3840 · 4K</option><option>7680 · 8K</option></select>
             </div>
           </div>
           <div class="field">
             <label>AI model</label>
-            <div class="chip-row">
+            <div class="chip-row" id="modelChips">
               <span class="chip active">Nova Vision v3</span>
               <span class="chip">Aperture XL</span>
               <span class="chip">Sketchline</span>
@@ -501,7 +515,7 @@ footer{border-top:1px solid var(--line); padding:60px 0 30px; position:relative;
           </div>
           <div class="field">
             <label>Style</label>
-            <div class="chip-row">
+            <div class="chip-row" id="styleChips">
               <span class="chip active">Cinematic</span><span class="chip">Realistic</span><span class="chip">Anime</span><span class="chip">3D</span><span class="chip">Fantasy</span>
             </div>
           </div>
@@ -524,6 +538,7 @@ footer{border-top:1px solid var(--line); padding:60px 0 30px; position:relative;
             <img id="genImg" src="" alt="AI generated preview">
           </div>
           <div class="gen-status"><span class="spinner" id="genSpinner"></span><span id="genStatusText">Ready — describe an image and press Generate</span></div>
+          <a id="genDownload" href="#" download="ai-generated.png" style="display:none; margin-top:10px; font-size:12.5px; font-weight:600; color:var(--cyan);">⬇ Download full-resolution image</a>
         </div>
       </div>
     </div>
@@ -547,19 +562,20 @@ footer{border-top:1px solid var(--line); padding:60px 0 30px; position:relative;
           <div class="layer-item"><div class="lswatch"></div> Text overlay</div>
           <h4 style="margin-top:24px">Magic Edit</h4>
           <div class="field" style="margin-bottom:10px">
-            <textarea id="magicEditPrompt" style="min-height:64px" placeholder="Change the sky to sunset…"></textarea>
+            <textarea style="min-height:64px" placeholder="Change the sky to sunset…"></textarea>
           </div>
-          <button class="btn btn-primary btn-sm" style="width:100%" onclick="runMagicEdit()">Generate edit</button>
+          <button class="btn btn-primary btn-sm" style="width:100%" onclick="toast('Select an area, then Generate to apply the edit')">Generate edit</button>
         </div>
         <div class="editor-canvas-wrap">
-          <img id="editorImage" src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=900&q=80" style="max-width:100%; max-height:380px; border-radius:10px; box-shadow:0 20px 60px rgba(0,0,0,.5); transition: filter 0.2s;" alt="editor canvas preview">
+          <img id="editorImg" src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=900&q=80" style="max-width:100%; max-height:380px; border-radius:10px; box-shadow:0 20px 60px rgba(0,0,0,.5)" alt="editor canvas preview">
         </div>
         <div class="editor-props">
           <h4>Adjustments</h4>
-          <div class="field"><label>Brightness <span class="val" id="valBrightness">0</span></label><input type="range" id="sliderBrightness" min="-50" max="50" value="0" oninput="updateFilters()"></div>
-          <div class="field"><label>Contrast <span class="val" id="valContrast">0</span></label><input type="range" id="sliderContrast" min="-50" max="50" value="0" oninput="updateFilters()"></div>
-          <div class="field"><label>Saturation <span class="val" id="valSaturation">0</span></label><input type="range" id="sliderSaturation" min="-50" max="50" value="0" oninput="updateFilters()"></div>
-          <div class="field"><label>Sharpen <span class="val" id="valBlur">0</span></label><input type="range" id="sliderBlur" min="0" max="10" value="0" oninput="updateFilters()"></div>
+          <div class="field"><label>Brightness <span class="val" id="valBrightness">+12</span></label><input type="range" min="-50" max="50" value="12" id="sldBrightness"></div>
+          <div class="field"><label>Contrast <span class="val" id="valContrast">+8</span></label><input type="range" min="-50" max="50" value="8" id="sldContrast"></div>
+          <div class="field"><label>Saturation <span class="val" id="valSaturation">+20</span></label><input type="range" min="-50" max="50" value="20" id="sldSaturation"></div>
+          <div class="field"><label>Temperature <span class="val" id="valTemperature">-4</span></label><input type="range" min="-50" max="50" value="-4" id="sldTemperature"></div>
+          <div class="field"><label>Sharpen <span class="val" id="valSharpen">36</span></label><input type="range" min="0" max="100" value="36" id="sldSharpen"></div>
         </div>
       </div>
     </div>
@@ -577,7 +593,7 @@ footer{border-top:1px solid var(--line); padding:60px 0 30px; position:relative;
         <div class="panel-controls">
           <div class="field">
             <label>Target resolution</label>
-            <div class="chip-row">
+            <div class="chip-row" id="enhResChips">
               <span class="chip">HD</span><span class="chip">2K</span><span class="chip active">4K</span><span class="chip">8K</span>
             </div>
           </div>
@@ -585,18 +601,19 @@ footer{border-top:1px solid var(--line); padding:60px 0 30px; position:relative;
           <div class="field"><label>Noise removal <span class="val">62</span></label><input type="range" min="0" max="100" value="62"></div>
           <div class="field"><label>Sharpening <span class="val">45</span></label><input type="range" min="0" max="100" value="45"></div>
           <div class="field"><label>Low-light boost <span class="val">30</span></label><input type="range" min="0" max="100" value="30"></div>
-          <button class="btn btn-primary" style="width:100%" onclick="toast('Enhancing image...')">Enhance to 4K</button>
-          <div style="margin-top:16px; font-size:12px; color:var(--text-faint)" class="mono">1024×1024 → 3840×3840</div>
+          <button class="btn btn-primary" style="width:100%" id="enhanceBtn" onclick="runEnhance()">Enhance photo</button>
+          <div style="margin-top:16px; font-size:12px; color:var(--text-faint)" class="mono" id="enhDims">Upload a photo above, then press Enhance</div>
+          <a id="enhDownload" href="#" download="enhanced.png" style="display:none; margin-top:10px; font-size:12.5px; font-weight:600; color:var(--cyan);">⬇ Download enhanced image</a>
         </div>
         <div class="panel-preview">
           <div class="ba-wrap reticle" id="baWrap">
             <div class="rc1"></div><div class="rc2"></div>
-            <img class="ba-before" src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=700&q=40&blur=3" alt="before enhancement">
+            <img class="ba-before" id="baBefore" src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=700&q=40&blur=3" alt="before enhancement">
             <img class="ba-after" id="baAfter" src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=1400&q=90" alt="after enhancement">
             <div class="ba-line" id="baLine"></div>
             <div class="ba-handle" id="baHandle"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg></div>
             <div class="ba-tag left">ORIGINAL</div>
-            <div class="ba-tag right">4K ENHANCED</div>
+            <div class="ba-tag right" id="enhTagRight">ENHANCED</div>
           </div>
         </div>
       </div>
@@ -611,6 +628,10 @@ footer{border-top:1px solid var(--line); padding:60px 0 30px; position:relative;
       <div><span class="tag">Background Studio</span><h2>One-click removal, any backdrop</h2></div>
     </div>
     <div class="qa-grid" style="grid-template-columns:repeat(4,1fr)" id="bgGrid"></div>
+    <div id="bgResultWrap" style="display:none; margin-top:28px; align-items:center; gap:22px; flex-wrap:wrap;">
+      <img id="bgResultImg" alt="Background removed result" style="max-width:280px; max-height:280px; border-radius:14px; border:1px solid var(--line); background:repeating-conic-gradient(#12141b 0% 25%, #0c0d12 0% 50%) 50%/16px 16px;">
+      <a id="bgDownload" href="#" download="background-removed.png" class="btn btn-primary btn-sm">⬇ Download PNG</a>
+    </div>
   </div>
 </section>
 
@@ -741,7 +762,7 @@ footer{border-top:1px solid var(--line); padding:60px 0 30px; position:relative;
       </div>
     </div>
     <div class="foot-bottom">
-      <span>© 2026 4K & 8K Photo Video Editor.</span>
+      <span>© 2026 4K & 8K Photo Video Editor. AI features are powered live by the Hugging Face Inference API. Payment and login are still mock/UI-only.</span>
       <div class="foot-socials">
         <div class="icon-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.5 2 2 6.5 2 12c0 4.4 2.9 8.2 6.8 9.5.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.1-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.3 1.1 2.9.8.1-.7.4-1.1.6-1.4-2.3-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.5-1.3.1-2.6 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .6 1.3.2 2.3.1 2.6.6.7 1 1.6 1 2.7 0 3.9-2.3 4.7-4.6 5 .4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5A10 10 0 0 0 22 12c0-5.5-4.5-10-10-10z"/></svg></div>
         <div class="icon-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 3a10.9 10.9 0 0 1-3.14 1.53 4.48 4.48 0 0 0-7.86 3v1A10.66 10.66 0 0 1 3 4s-4 9 5 13a11.64 11.64 0 0 1-7 2c9 5 20 0 20-11.5a4.5 4.5 0 0 0-.08-.83A7.72 7.72 0 0 0 23 3z"/></svg></div>
@@ -753,14 +774,28 @@ footer{border-top:1px solid var(--line); padding:60px 0 30px; position:relative;
 
 <div class="toast" id="toast"><span class="tdot"></span><span id="toastMsg"></span></div>
 
+<div class="modal-overlay" id="settingsOverlay" onclick="if(event.target===this)closeSettings()">
+  <div class="modal-box">
+    <h3>🔑 Hugging Face API Key</h3>
+    <p class="hint">
+      This site runs fully in your browser (GitHub Pages) with no backend server, so your token is
+      saved only in <b>this browser's local storage</b> — it's sent directly from your device to
+      Hugging Face, and never touches any server of ours. Don't share this browser/device if the
+      token should stay private, and never paste your token into a public repo.
+    </p>
+    <div class="field">
+      <label>Token <span class="val"><a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener" style="color:var(--cyan)">Get one free →</a></span></label>
+      <input type="text" id="hfTokenInput" placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" style="flex:1" onclick="saveSettings()">Save key</button>
+      <button class="btn btn-ghost" onclick="closeSettings()">Close</button>
+    </div>
+    <div class="status-line"><span class="status-dot" id="tokenStatusDot"></span><span id="tokenStatusText">No key saved yet</span></div>
+  </div>
+</div>
+
 <script>
-/* ---------------- CONFIGURATION ---------------- */
-// GitHub security scanner se bachne ke liye token ko 2 parts mein daalein:
-const TOKEN_PART1 = "hf_PART1_HERE"; // Apne token ka pehla aadha part yahan rakhein
-const TOKEN_PART2 = "PART2_HERE";       // Baaki ka hissa yahan rakhein
-
-const HF_TOKEN = TOKEN_PART1 + TOKEN_PART2;
-
 /* ---------------- utility ---------------- */
 function toast(msg){
   const t=document.getElementById('toast');
@@ -769,6 +804,7 @@ function toast(msg){
   clearTimeout(window.__tt);
   window.__tt=setTimeout(()=>t.classList.remove('show'),2600);
 }
+function icon(svg){return svg;}
 
 /* ---------------- quick actions ---------------- */
 const quickActions=[
@@ -814,7 +850,7 @@ document.getElementById('editorToolbar').innerHTML=etools.map((p,i)=>`
 /* ---------------- background studio grid ---------------- */
 const bgOptions=['Automatic Removal','Studio Background','3D Background','Transparent PNG'];
 document.getElementById('bgGrid').innerHTML=bgOptions.map((n,i)=>`
-  <div class="qa-card" onclick="toast('${n} selected')">
+  <div class="qa-card" onclick="runRemoveBackground('${n}')">
     <div class="qi"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/></svg></div>
     <div><b>${n}</b><br><small>1 credit</small></div>
   </div>`).join('');
@@ -873,7 +909,7 @@ document.getElementById('batchList').innerHTML=batchFiles.map(([n,st,pc])=>`
 /* ---------------- testimonials ---------------- */
 const testis=[
   ['This replaced three separate apps for our product photography pipeline.','Marisol Vega','E-commerce lead'],
-  ['Restored my grandmother\\'s 1962 wedding photos in minutes — genuinely emotional.','Daniel Osei','Hobbyist'],
+  ['Restored my grandmother\'s 1962 wedding photos in minutes — genuinely emotional.','Daniel Osei','Hobbyist'],
   ['Batch 8K upscaling cut our print prep time from days to an afternoon.','Priya Raman','Studio owner']
 ];
 document.getElementById('testiGrid').innerHTML=testis.map(([q,n,r])=>`
@@ -939,6 +975,119 @@ document.querySelectorAll('.chip-row').forEach(row=>{
   });
 });
 
+/* ================================================================
+   LIVE INTEGRATION — calls Hugging Face Inference API DIRECTLY
+   from the browser (no backend server; works on GitHub Pages).
+   Each visitor pastes their own free HF token via the ⚙ key icon —
+   it's saved only in their own browser's localStorage.
+   ================================================================ */
+const HF_MODELS={
+  t2i:{
+    'Nova Vision v3':'stabilityai/stable-diffusion-xl-base-1.0',
+    'Aperture XL':'stabilityai/stable-diffusion-xl-base-1.0',
+    'Sketchline':'runwayml/stable-diffusion-v1-5',
+    'Real-8K':'black-forest-labs/FLUX.1-schnell'
+  },
+  bgRemoval:'briaai/RMBG-1.4',
+  upscale:'caidas/swin2SR-classical-sr-x4-64'
+};
+
+/* ---------------- settings modal ---------------- */
+function getHFToken(){return (localStorage.getItem('hf_token')||'').trim();}
+function refreshTokenStatus(){
+  const has=!!getHFToken();
+  document.getElementById('tokenStatusDot').classList.toggle('ok',has);
+  document.getElementById('tokenStatusText').textContent=has?'Key saved in this browser':'No key saved yet';
+}
+function openSettings(){
+  document.getElementById('hfTokenInput').value=getHFToken();
+  refreshTokenStatus();
+  document.getElementById('settingsOverlay').classList.add('open');
+}
+function closeSettings(){document.getElementById('settingsOverlay').classList.remove('open');}
+function saveSettings(){
+  const v=document.getElementById('hfTokenInput').value.trim();
+  if(v) localStorage.setItem('hf_token',v);
+  else localStorage.removeItem('hf_token');
+  refreshTokenStatus();
+  toast(v?'API key saved to this browser':'API key cleared');
+}
+refreshTokenStatus();
+
+function requireToken(){
+  const t=getHFToken();
+  if(!t){
+    toast('Add your free Hugging Face key first (⚙ icon, top right)');
+    openSettings();
+    throw new Error('No API key set');
+  }
+  return t;
+}
+
+/* ---------------- core Hugging Face caller (with cold-start retry) ---------------- */
+async function callHF(model,body,contentType){
+  const token=requireToken();
+  const url=`https://api-inference.huggingface.co/models/${model}`;
+  const maxRetries=5;
+  for(let attempt=0;attempt<=maxRetries;attempt++){
+    let res;
+    try{
+      res=await fetch(url,{
+        method:'POST',
+        headers:{Authorization:`Bearer ${token}`,'Content-Type':contentType},
+        body: contentType==='application/json'?JSON.stringify(body):body
+      });
+    }catch(networkErr){
+      throw new Error('Could not reach Hugging Face — check your internet connection, or the model may not allow direct browser (CORS) requests.');
+    }
+    const ct=res.headers.get('content-type')||'';
+    if(res.ok && ct.startsWith('image/')){
+      return await res.blob();
+    }
+    let json;
+    try{json=await res.json();}
+    catch{throw new Error(`Hugging Face returned an unexpected response (status ${res.status})`);}
+
+    const isLoading=res.status===503 || (typeof json.error==='string' && json.error.toLowerCase().includes('loading'));
+    if(isLoading && attempt<maxRetries){
+      const wait=Math.min(json.estimated_time||5,20);
+      await new Promise(r=>setTimeout(r,wait*1000));
+      continue;
+    }
+    if(res.ok && json){
+      const b64=json.image||json.generated_image||(Array.isArray(json)&&json[0]&&json[0].mask);
+      if(b64){
+        const cleaned=b64.replace(/^data:image\/\w+;base64,/,'');
+        const bytes=atob(cleaned);
+        const arr=new Uint8Array(bytes.length);
+        for(let i=0;i<bytes.length;i++)arr[i]=bytes.charCodeAt(i);
+        return new Blob([arr],{type:'image/png'});
+      }
+    }
+    throw new Error((json&&json.error)||`Hugging Face request failed (status ${res.status})`);
+  }
+}
+
+/* shared "currently uploaded" file, used by Background Studio + Enhancer */
+let currentFile=null;
+
+function activeChipText(rowId){
+  const el=document.querySelector(`#${rowId} .chip.active`);
+  return el?el.textContent.trim():null;
+}
+
+function dimensionsFromAspect(aspectRatio,base){
+  const ratios={
+    '1:1 Square':[1,1],'16:9 Widescreen':[16,9],'9:16 Portrait':[9,16],
+    '4:5 Social':[4,5],'3:2 Classic':[3,2]
+  };
+  const [w,h]=ratios[aspectRatio]||[1,1];
+  const long=base;
+  const short=Math.round((base*Math.min(w,h))/Math.max(w,h)/8)*8;
+  return w>=h?{width:long,height:short}:{width:short,height:long};
+}
+const RESOLUTION_MAP={'1024 · Standard':1024,'2048 · 2K':1536,'3840 · 4K':1536,'7680 · 8K':1536};
+
 /* prompt char count */
 const promptInput=document.getElementById('promptInput');
 promptInput.addEventListener('input',()=>{
@@ -947,108 +1096,126 @@ promptInput.addEventListener('input',()=>{
 const numImgs=document.getElementById('numImgs');
 numImgs.addEventListener('input',()=>document.getElementById('numImgsVal').textContent=numImgs.value);
 
-/* ---------------- REAL HUGGING FACE API GENERATION ---------------- */
-async function runGenerate(){
-  const promptVal = promptInput.value.trim();
-  if(!promptVal){
-    toast('Enter a prompt first');
-    return;
-  }
-
+/* ---------------- Text-to-Image generator ---------------- */
+function runGenerate(){
+  if(!promptInput.value.trim()){toast('Enter a prompt first');return;}
+  let token; try{token=requireToken();}catch{return;}
   const btn=document.getElementById('generateBtn');
   const spinner=document.getElementById('genSpinner');
   const statusText=document.getElementById('genStatusText');
   const placeholder=document.getElementById('genPlaceholder');
   const img=document.getElementById('genImg');
-
-  btn.disabled=true; 
-  btn.style.opacity=.6;
+  const dl=document.getElementById('genDownload');
+  btn.disabled=true; btn.style.opacity=.6;
   spinner.classList.add('show');
   placeholder.style.display='none';
   img.classList.remove('show');
-  statusText.textContent='Generating image via Hugging Face API...';
+  dl.style.display='none';
+  statusText.textContent='Sending prompt to Hugging Face…';
 
-  try {
-    const response = await fetch(
-      "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-dev",
-      {
-        headers: {
-          Authorization: `Bearer ${HF_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-        body: JSON.stringify({ inputs: promptVal }),
-      }
-    );
+  const style=activeChipText('styleChips');
+  const fullPrompt=style && style!=='Realistic' ? `${promptInput.value.trim()}, ${style.toLowerCase()} style` : promptInput.value.trim();
+  const modelName=activeChipText('modelChips');
+  const hfModel=HF_MODELS.t2i[modelName]||HF_MODELS.t2i['Nova Vision v3'];
+  const base=RESOLUTION_MAP[document.getElementById('resSelect').value]||1024;
+  const {width,height}=dimensionsFromAspect(document.getElementById('aspectSelect').value,base);
+  const negPrompt=document.getElementById('negPrompt').value.trim();
 
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.statusText}`);
-    }
-
-    const blob = await response.blob();
-    const objectURL = URL.createObjectURL(blob);
-
-    img.src = objectURL;
+  callHF(hfModel,{
+    inputs:fullPrompt,
+    parameters:{negative_prompt:negPrompt||undefined,width,height}
+  },'application/json').then(blob=>{
+    const url=URL.createObjectURL(blob);
+    img.src=url;
     img.classList.add('show');
-    statusText.textContent='Done — Generated successfully!';
-  } catch (error) {
-    console.error(error);
-    statusText.textContent='Generation failed. Check your API Key or prompt.';
-    toast('API Generation Failed');
-  } finally {
+    dl.href=url; dl.style.display='inline-block';
+    statusText.textContent='Done — generated with '+(modelName||'AI model');
+  }).catch(err=>{
+    statusText.textContent='Error: '+err.message;
+    placeholder.style.display='flex';
+    toast(err.message);
+  }).finally(()=>{
     spinner.classList.remove('show');
-    btn.disabled=false; 
-    btn.style.opacity=1;
+    btn.disabled=false; btn.style.opacity=1;
+  });
+}
+
+/* ---------------- Background removal ---------------- */
+function runRemoveBackground(optionName){
+  if(!currentFile){
+    toast('Upload a photo first — use the box near the top of the page');
+    document.getElementById('dropzone').scrollIntoView({behavior:'smooth',block:'center'});
+    return;
   }
+  let token; try{token=requireToken();}catch{return;}
+  toast(`${optionName} — processing on Hugging Face…`);
+  callHF(HF_MODELS.bgRemoval,currentFile,currentFile.type||'image/png').then(blob=>{
+    const url=URL.createObjectURL(blob);
+    document.getElementById('bgResultImg').src=url;
+    document.getElementById('bgDownload').href=url;
+    document.getElementById('bgResultWrap').style.display='flex';
+    document.getElementById('bgResultWrap').scrollIntoView({behavior:'smooth',block:'center'});
+    toast('Background removed');
+  }).catch(err=>toast('Error: '+err.message));
 }
 
-/* ---------------- BACKGROUND REMOVER INTEGRATION ---------------- */
-async function removeBackgroundAPI(imageFile) {
-  toast('Removing background via AI...');
-  try {
-    const response = await fetch(
-      "https://api-inference.huggingface.co/models/briaai/RMBG-1.4",
-      {
-        headers: { Authorization: `Bearer ${HF_TOKEN}` },
-        method: "POST",
-        body: imageFile,
-      }
-    );
-
-    if (!response.ok) throw new Error('Failed to remove background');
-
-    const blob = await response.blob();
-    const resultURL = URL.createObjectURL(blob);
-    
-    document.getElementById('editorImage').src = resultURL;
-    toast('Background Removed Successfully!');
-  } catch (err) {
-    console.error(err);
-    toast('Background removal failed');
+/* ---------------- 4K/8K Enhancer ---------------- */
+function runEnhance(){
+  if(!currentFile){
+    toast('Upload a photo first — use the box near the top of the page');
+    document.getElementById('dropzone').scrollIntoView({behavior:'smooth',block:'center'});
+    return;
   }
+  let token; try{token=requireToken();}catch{return;}
+  const btn=document.getElementById('enhanceBtn');
+  const dims=document.getElementById('enhDims');
+  const dl=document.getElementById('enhDownload');
+  const target=activeChipText('enhResChips')||'4K';
+  document.getElementById('enhTagRight').textContent=target+' ENHANCED';
+  btn.disabled=true; btn.style.opacity=.6;
+  dims.textContent='Enhancing on Hugging Face… this can take 10–30s on the free tier';
+  dl.style.display='none';
+
+  callHF(HF_MODELS.upscale,currentFile,currentFile.type||'image/png').then(blob=>{
+    const url=URL.createObjectURL(blob);
+    document.getElementById('baAfter').src=url;
+    dl.href=url; dl.style.display='inline-block';
+    const tmp=new Image();
+    tmp.onload=()=>{dims.textContent=`Enhanced output: ${tmp.naturalWidth}×${tmp.naturalHeight}`;};
+    tmp.src=url;
+    toast('Enhancement complete');
+  }).catch(err=>{
+    dims.textContent='Error: '+err.message;
+    toast(err.message);
+  }).finally(()=>{
+    btn.disabled=false; btn.style.opacity=1;
+  });
 }
 
-/* ---------------- IMAGE ADJUSTMENTS ---------------- */
-function updateFilters(){
-  const b = document.getElementById('sliderBrightness').value;
-  const c = document.getElementById('sliderContrast').value;
-  const s = document.getElementById('sliderSaturation').value;
-  const blur = document.getElementById('sliderBlur').value;
-
-  document.getElementById('valBrightness').textContent = b;
-  document.getElementById('valContrast').textContent = c;
-  document.getElementById('valSaturation').textContent = s;
-  document.getElementById('valBlur').textContent = blur;
-
-  const img = document.getElementById('editorImage');
-  img.style.filter = `brightness(${100 + parseInt(b)}%) contrast(${100 + parseInt(c)}%) saturate(${100 + parseInt(s)}%) blur(${blur}px)`;
+/* ---------------- Photo editor: live brightness/contrast/etc ---------------- */
+function updateEditorFilter(){
+  const b=document.getElementById('sldBrightness').value;
+  const c=document.getElementById('sldContrast').value;
+  const s=document.getElementById('sldSaturation').value;
+  const t=document.getElementById('sldTemperature').value;
+  document.getElementById('valBrightness').textContent=(b>=0?'+':'')+b;
+  document.getElementById('valContrast').textContent=(c>=0?'+':'')+c;
+  document.getElementById('valSaturation').textContent=(s>=0?'+':'')+s;
+  document.getElementById('valTemperature').textContent=(t>=0?'+':'')+t;
+  // Brightness/Contrast/Saturation are standard image-processing ops, applied
+  // live in-browser via CSS filters (no AI call needed for these).
+  const brightness=1+(b/100), contrast=1+(c/100), saturate=1+(s/100);
+  const warmth=t>0?`sepia(${Math.min(t,50)/100})`:'';
+  document.getElementById('editorImg').style.filter=
+    `brightness(${brightness}) contrast(${contrast}) saturate(${saturate}) ${warmth}`;
 }
-
-function runMagicEdit(){
-  const p = document.getElementById('magicEditPrompt').value.trim();
-  if(!p) { toast('Please enter an edit prompt'); return; }
-  toast(`Applying magic edit: "${p}"`);
-}
+['sldBrightness','sldContrast','sldSaturation','sldTemperature'].forEach(id=>{
+  document.getElementById(id).addEventListener('input',updateEditorFilter);
+});
+document.getElementById('sldSharpen').addEventListener('input',e=>{
+  document.getElementById('valSharpen').textContent=e.target.value;
+});
+updateEditorFilter();
 
 /* ---------------- before/after slider ---------------- */
 const baWrap=document.getElementById('baWrap');
@@ -1109,25 +1276,28 @@ mobileDrawer.querySelectorAll('.md-link').forEach(a=>a.addEventListener('click',
 const dz=document.getElementById('dropzone');
 ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('drag');}));
 ['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('drag');}));
-
-function handleFileUpload(file){
-  if(file) {
-    toast(`Loaded "${file.name}"`);
-    const imgUrl = URL.createObjectURL(file);
-    document.getElementById('editorImage').src = imgUrl;
-    
-    // Auto remove background on upload
-    removeBackgroundAPI(file);
+function setCurrentFile(f){
+  if(!f) return;
+  currentFile=f;
+  const dzText=dz.querySelector('.dz-text b');
+  const dzSub=dz.querySelector('.dz-text span');
+  if(dzText) dzText.textContent=`Loaded: ${f.name}`;
+  if(dzSub) dzSub.textContent='Ready — use Background Studio, the Enhancer, or the Editor below';
+  if(f.type.startsWith('image/')){
+    const url=URL.createObjectURL(f);
+    document.getElementById('editorImg').src=url;
+    document.getElementById('baBefore').src=url;
+    document.getElementById('baAfter').src=url;
   }
+  toast(`Loaded "${f.name}" — choose a tool above`);
 }
-
 dz.addEventListener('drop',e=>{
   const f=e.dataTransfer.files[0];
-  handleFileUpload(f);
+  setCurrentFile(f);
 });
 document.getElementById('fileInput').addEventListener('change',e=>{
   const f=e.target.files[0];
-  handleFileUpload(f);
+  setCurrentFile(f);
 });
 </script>
 </body>
