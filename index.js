@@ -136,7 +136,16 @@ app.post("/api/enhance-image", upload.single("image"), async (req, res) => {
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, hasToken: !!process.env.HF_TOKEN && !process.env.HF_TOKEN.startsWith("hf_xxxx") });
 });
+const path = require('path');
+
+app.use(express.static(path.join(__dirname, '/')));
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
 
 app.listen(PORT, () => {
   console.log(`✔ 4K/8K Photo Video Editor server running on http://localhost:${PORT}`);
 });
+const path = require('path');
+
