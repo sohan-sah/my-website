@@ -387,7 +387,6 @@ footer{border-top:1px solid var(--line); padding:60px 0 30px; position:relative;
       <a href="#pricing">Pricing</a>
     </nav>
     <div class="nav-right">
-      <button class="icon-btn" title="Hugging Face API Key" id="apiKeyBtn" onclick="openSettings()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></button>
       <button class="icon-btn" title="Search" onclick="toast('Search — press / to focus anywhere')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
       <button class="icon-btn" title="Notifications" onclick="toast('3 new notifications')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></button>
       <div class="credits-pill"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg> 248 credits</div>
@@ -774,27 +773,6 @@ footer{border-top:1px solid var(--line); padding:60px 0 30px; position:relative;
 
 <div class="toast" id="toast"><span class="tdot"></span><span id="toastMsg"></span></div>
 
-<div class="modal-overlay" id="settingsOverlay" onclick="if(event.target===this)closeSettings()">
-  <div class="modal-box">
-    <h3>🔑 Hugging Face API Key</h3>
-    <p class="hint">
-      This site runs fully in your browser (GitHub Pages) with no backend server, so your token is
-      saved only in <b>this browser's local storage</b> — it's sent directly from your device to
-      Hugging Face, and never touches any server of ours. Don't share this browser/device if the
-      token should stay private, and never paste your token into a public repo.
-    </p>
-    <div class="field">
-      <label>Token <span class="val"><a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener" style="color:var(--cyan)">Get one free →</a></span></label>
-      <input type="text" id="hfTokenInput" placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-primary" style="flex:1" onclick="saveSettings()">Save key</button>
-      <button class="btn btn-ghost" onclick="closeSettings()">Close</button>
-    </div>
-    <div class="status-line"><span class="status-dot" id="tokenStatusDot"></span><span id="tokenStatusText">No key saved yet</span></div>
-  </div>
-</div>
-
 <script>
 /* ---------------- utility ---------------- */
 function toast(msg){
@@ -976,117 +954,14 @@ document.querySelectorAll('.chip-row').forEach(row=>{
 });
 
 /* ================================================================
-   LIVE INTEGRATION — calls Hugging Face Inference API DIRECTLY
-   from the browser (no backend server; works on GitHub Pages).
-   Each visitor pastes their own free HF token via the ⚙ key icon —
-   it's saved only in their own browser's localStorage.
+   LIVE BACKEND INTEGRATION (Hugging Face Inference API)
+   All calls go to this same server, under /api/* — see server/index.js
+   Deploy server/ to Render (or any Node host); your HF_TOKEN stays on
+   the server only. Visitors don't need to enter any key.
    ================================================================ */
-const HF_MODELS={
-  t2i:{
-    'Nova Vision v3':'stabilityai/stable-diffusion-xl-base-1.0',
-    'Aperture XL':'stabilityai/stable-diffusion-xl-base-1.0',
-    'Sketchline':'runwayml/stable-diffusion-v1-5',
-    'Real-8K':'black-forest-labs/FLUX.1-schnell'
-  },
-  bgRemoval:'briaai/RMBG-1.4',
-  upscale:'caidas/swin2SR-classical-sr-x4-64'
-};
-
-/* ---------------- settings modal ---------------- */
-function getHFToken(){return (localStorage.getItem('hf_token')||'').trim();}
-function refreshTokenStatus(){
-  const has=!!getHFToken();
-  document.getElementById('tokenStatusDot').classList.toggle('ok',has);
-  document.getElementById('tokenStatusText').textContent=has?'Key saved in this browser':'No key saved yet';
-}
-function openSettings(){
-  document.getElementById('hfTokenInput').value=getHFToken();
-  refreshTokenStatus();
-  document.getElementById('settingsOverlay').classList.add('open');
-}
-function closeSettings(){document.getElementById('settingsOverlay').classList.remove('open');}
-function saveSettings(){
-  const v=document.getElementById('hfTokenInput').value.trim();
-  if(v) localStorage.setItem('hf_token',v);
-  else localStorage.removeItem('hf_token');
-  refreshTokenStatus();
-  toast(v?'API key saved to this browser':'API key cleared');
-}
-refreshTokenStatus();
-
-function requireToken(){
-  const t=getHFToken();
-  if(!t){
-    toast('Add your free Hugging Face key first (⚙ icon, top right)');
-    openSettings();
-    throw new Error('No API key set');
-  }
-  return t;
-}
-
-/* ---------------- core Hugging Face caller (with cold-start retry) ---------------- */
-async function callHF(model,body,contentType){
-  const token=requireToken();
-  const url=`https://api-inference.huggingface.co/models/${model}`;
-  const maxRetries=5;
-  for(let attempt=0;attempt<=maxRetries;attempt++){
-    let res;
-    try{
-      res=await fetch(url,{
-        method:'POST',
-        headers:{Authorization:`Bearer ${token}`,'Content-Type':contentType},
-        body: contentType==='application/json'?JSON.stringify(body):body
-      });
-    }catch(networkErr){
-      throw new Error('Could not reach Hugging Face — check your internet connection, or the model may not allow direct browser (CORS) requests.');
-    }
-    const ct=res.headers.get('content-type')||'';
-    if(res.ok && ct.startsWith('image/')){
-      return await res.blob();
-    }
-    let json;
-    try{json=await res.json();}
-    catch{throw new Error(`Hugging Face returned an unexpected response (status ${res.status})`);}
-
-    const isLoading=res.status===503 || (typeof json.error==='string' && json.error.toLowerCase().includes('loading'));
-    if(isLoading && attempt<maxRetries){
-      const wait=Math.min(json.estimated_time||5,20);
-      await new Promise(r=>setTimeout(r,wait*1000));
-      continue;
-    }
-    if(res.ok && json){
-      const b64=json.image||json.generated_image||(Array.isArray(json)&&json[0]&&json[0].mask);
-      if(b64){
-        const cleaned=b64.replace(/^data:image\/\w+;base64,/,'');
-        const bytes=atob(cleaned);
-        const arr=new Uint8Array(bytes.length);
-        for(let i=0;i<bytes.length;i++)arr[i]=bytes.charCodeAt(i);
-        return new Blob([arr],{type:'image/png'});
-      }
-    }
-    throw new Error((json&&json.error)||`Hugging Face request failed (status ${res.status})`);
-  }
-}
-
-/* shared "currently uploaded" file, used by Background Studio + Enhancer */
-let currentFile=null;
-
-function activeChipText(rowId){
-  const el=document.querySelector(`#${rowId} .chip.active`);
-  return el?el.textContent.trim():null;
-}
-
-function dimensionsFromAspect(aspectRatio,base){
-  const ratios={
-    '1:1 Square':[1,1],'16:9 Widescreen':[16,9],'9:16 Portrait':[9,16],
-    '4:5 Social':[4,5],'3:2 Classic':[3,2]
-  };
-  const [w,h]=ratios[aspectRatio]||[1,1];
-  const long=base;
-  const short=Math.round((base*Math.min(w,h))/Math.max(w,h)/8)*8;
-  return w>=h?{width:long,height:short}:{width:short,height:long};
-}
-const RESOLUTION_MAP={'1024 · Standard':1024,'2048 · 2K':1536,'3840 · 4K':1536,'7680 · 8K':1536};
+const API_BASE=''; // same-origin by default; if the frontend (this file) is hosted
+// separately from the backend (e.g. GitHub Pages + Render), set this to your
+// Render URL, e.g. const API_BASE='https://my-website-xxxx.onrender.com';
 
 /* prompt char count */
 const promptInput=document.getElementById('promptInput');
@@ -1096,10 +971,40 @@ promptInput.addEventListener('input',()=>{
 const numImgs=document.getElementById('numImgs');
 numImgs.addEventListener('input',()=>document.getElementById('numImgsVal').textContent=numImgs.value);
 
+/* shared "currently uploaded" file, used by Background Studio + Enhancer */
+let currentFile=null;
+
+function activeChipText(rowId){
+  const el=document.querySelector(`#${rowId} .chip.active`);
+  return el?el.textContent.trim():null;
+}
+
+async function apiPostJSON(path,body){
+  const res=await fetch(API_BASE+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!res.ok){
+    let msg=`Request failed (${res.status})`;
+    try{const j=await res.json();msg=j.error||msg;}catch{}
+    throw new Error(msg);
+  }
+  return res.blob();
+}
+
+async function apiPostFile(path,file,extraFields={}){
+  const fd=new FormData();
+  fd.append('image',file);
+  Object.entries(extraFields).forEach(([k,v])=>fd.append(k,v));
+  const res=await fetch(API_BASE+path,{method:'POST',body:fd});
+  if(!res.ok){
+    let msg=`Request failed (${res.status})`;
+    try{const j=await res.json();msg=j.error||msg;}catch{}
+    throw new Error(msg);
+  }
+  return res.blob();
+}
+
 /* ---------------- Text-to-Image generator ---------------- */
 function runGenerate(){
   if(!promptInput.value.trim()){toast('Enter a prompt first');return;}
-  let token; try{token=requireToken();}catch{return;}
   const btn=document.getElementById('generateBtn');
   const spinner=document.getElementById('genSpinner');
   const statusText=document.getElementById('genStatusText');
@@ -1115,21 +1020,19 @@ function runGenerate(){
 
   const style=activeChipText('styleChips');
   const fullPrompt=style && style!=='Realistic' ? `${promptInput.value.trim()}, ${style.toLowerCase()} style` : promptInput.value.trim();
-  const modelName=activeChipText('modelChips');
-  const hfModel=HF_MODELS.t2i[modelName]||HF_MODELS.t2i['Nova Vision v3'];
-  const base=RESOLUTION_MAP[document.getElementById('resSelect').value]||1024;
-  const {width,height}=dimensionsFromAspect(document.getElementById('aspectSelect').value,base);
-  const negPrompt=document.getElementById('negPrompt').value.trim();
 
-  callHF(hfModel,{
-    inputs:fullPrompt,
-    parameters:{negative_prompt:negPrompt||undefined,width,height}
-  },'application/json').then(blob=>{
+  apiPostJSON('/api/generate-image',{
+    prompt:fullPrompt,
+    negativePrompt:document.getElementById('negPrompt').value.trim(),
+    model:activeChipText('modelChips'),
+    resolution:document.getElementById('resSelect').value,
+    aspectRatio:document.getElementById('aspectSelect').value
+  }).then(blob=>{
     const url=URL.createObjectURL(blob);
     img.src=url;
     img.classList.add('show');
     dl.href=url; dl.style.display='inline-block';
-    statusText.textContent='Done — generated with '+(modelName||'AI model');
+    statusText.textContent='Done — generated with '+(activeChipText('modelChips')||'AI model');
   }).catch(err=>{
     statusText.textContent='Error: '+err.message;
     placeholder.style.display='flex';
@@ -1147,9 +1050,8 @@ function runRemoveBackground(optionName){
     document.getElementById('dropzone').scrollIntoView({behavior:'smooth',block:'center'});
     return;
   }
-  let token; try{token=requireToken();}catch{return;}
   toast(`${optionName} — processing on Hugging Face…`);
-  callHF(HF_MODELS.bgRemoval,currentFile,currentFile.type||'image/png').then(blob=>{
+  apiPostFile('/api/remove-background',currentFile).then(blob=>{
     const url=URL.createObjectURL(blob);
     document.getElementById('bgResultImg').src=url;
     document.getElementById('bgDownload').href=url;
@@ -1166,7 +1068,6 @@ function runEnhance(){
     document.getElementById('dropzone').scrollIntoView({behavior:'smooth',block:'center'});
     return;
   }
-  let token; try{token=requireToken();}catch{return;}
   const btn=document.getElementById('enhanceBtn');
   const dims=document.getElementById('enhDims');
   const dl=document.getElementById('enhDownload');
@@ -1176,7 +1077,7 @@ function runEnhance(){
   dims.textContent='Enhancing on Hugging Face… this can take 10–30s on the free tier';
   dl.style.display='none';
 
-  callHF(HF_MODELS.upscale,currentFile,currentFile.type||'image/png').then(blob=>{
+  apiPostFile('/api/enhance-image',currentFile,{targetResolution:target}).then(blob=>{
     const url=URL.createObjectURL(blob);
     document.getElementById('baAfter').src=url;
     dl.href=url; dl.style.display='inline-block';
@@ -1191,6 +1092,7 @@ function runEnhance(){
     btn.disabled=false; btn.style.opacity=1;
   });
 }
+
 
 /* ---------------- Photo editor: live brightness/contrast/etc ---------------- */
 function updateEditorFilter(){
