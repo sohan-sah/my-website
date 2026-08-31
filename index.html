@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Studio</title>
+<style>
+  :root{ --ink:#1c1b19; --paper:#f6f4ee; --line:#dedad0; --accent:#3d5a45; --accent2:#b0521f; --panel:#ffffff; --mut:#8a8578; }
+  *{box-sizing:border-box;}
+  html,body{ margin:0; height:100%; }
+  body{ font-family:'Segoe UI',system-ui,sans-serif; background:var(--paper); color:var(--ink); display:flex; flex-direction:column; height:100vh; overflow:hidden; }
+  header{ padding:12px 16px 8px; flex-shrink:0; }
+  header h1{ font-size:16px; margin:0 0 10px; font-weight:700; } header h1 span{ color:var(--accent2); }
+  .search-bar{ display:flex; align-items:center; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:8px 12px; gap:8px; }
+  .search-bar input{ border:none; outline:none; flex:1; font-size:14px; background:transparent; font-family:inherit; }
+  .search-bar .ic{ color:var(--mut); }
+
+  main{ flex:1; overflow-y:auto; padding:0 16px 16px; }
+  .screen{ display:none; }
+  .screen.active{ display:block; }
+
+  .search-results{ margin-top:10px; }
+  .result{ display:flex; align-items:center; gap:10px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:8px; cursor:pointer; text-decoration:none; color:inherit; }
+  .result:hover{ border-color:var(--accent); }
+  .result .ic{ font-size:20px; width:28px; text-align:center; }
+  .result .rinfo{ flex:1; min-width:0; }
+  .result b{ font-size:13px; display:block; }
+  .result small{ color:var(--mut); font-size:11px; }
+  .badge{ font-size:9.5px; padding:2px 6px; border-radius:8px; flex-shrink:0; }
+  .badge.available{ background:#dcead8; color:var(--accent); }
+  .badge.unavailable{ background:#f0ede4; color:var(--mut); }
+  #noResults{ text-align:center; color:var(--mut); padding:30px 10px; font-size:13px; }
+
+  h2.section{ font-size:12.5px; color:var(--mut); text-transform:uppercase; letter-spacing:.05em; margin:18px 0 10px; }
+  h2.section:first-child{ margin-top:6px; }
+  .grid2{ display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
+  .card{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 12px; text-decoration:none; color:inherit; display:flex; flex-direction:column; gap:6px; }
+  .card:hover{ border-color:var(--accent); }
+  .card .ic{ font-size:22px; }
+  .card b{ font-size:12.5px; }
+  .card small{ color:var(--mut); font-size:10.5px; }
+
+  .tpl-swatch{ width:100%; aspect-ratio:var(--ar,1); background:linear-gradient(135deg,#e8e4d8,#d8d3c4); border-radius:6px; }
+
+  nav.bottom{ display:flex; border-top:1px solid var(--line); background:var(--panel); flex-shrink:0; }
+  nav.bottom button{ flex:1; background:none; border:none; padding:9px 4px 8px; display:flex; flex-direction:column; align-items:center; gap:2px; font-size:10.5px; color:var(--mut); cursor:pointer; font-family:inherit; }
+  nav.bottom button.active{ color:var(--accent); font-weight:600; }
+  nav.bottom button .ic{ font-size:18px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Photo &amp; Video <span>Studio</span></h1>
+  <div class="search-bar">
+    <span class="ic">&#128269;</span>
+    <input id="searchInput" type="text" placeholder="Search tools (e.g. 4K, background, cartoon, thumbnail)">
+  </div>
+</header>
+
+<main>
+  <div class="screen" id="screen-search">
+    <div id="searchResults" class="search-results"></div>
+    <div id="noResults" style="display:none">No matching tools found.</div>
+  </div>
+
+  <div class="screen active" id="screen-home">
+    <h2 class="section">Editors</h2>
+    <div class="grid2" id="editorCards"></div>
+    <h2 class="section">Utilities</h2>
+    <div class="grid2" id="utilityCards"></div>
+    <h2 class="section">Coming Later</h2>
+    <div class="grid2" id="unavailableCards"></div>
+  </div>
+
+  <div class="screen" id="screen-templates">
+    <h2 class="section">Social</h2>
+    <div class="grid2" id="tplSocial"></div>
+    <h2 class="section">Print</h2>
+    <div class="grid2" id="tplPrint"></div>
+    <h2 class="section">Other</h2>
+    <div class="grid2" id="tplOther"></div>
+  </div>
+
+  <div class="screen" id="screen-more">
+    <h2 class="section">More</h2>
+    <div class="grid2">
+      <a class="card" href="history.html"><span class="ic">&#128337;</span><b>History</b><small>Local browser history</small></a>
+      <a class="card" href="settings.html"><span class="ic">&#9881;&#65039;</span><b>Settings</b><small>Theme, defaults, storage</small></a>
+    </div>
+  </div>
+</main>
+
+<nav class="bottom" id="bottomNav">
+  <button data-screen="home" class="active"><span class="ic">&#127968;</span>Home</button>
+  <button data-screen="search"><span class="ic">&#10133;</span>Create</button>
+  <button data-screen="templates"><span class="ic">&#128196;</span>Templates</button>
+  <button data-screen="more"><span class="ic">&#8942;</span>More</button>
+</nav>
+
+<script>
+(() => {
+  // ---------- Feature registry (Phase 19: real search) ----------
+  const REGISTRY = [
+    { name:'Photo Editor', route:'photo-editor.html', icon:'\u{1F5BC}', keywords:['photo','editor','crop','resize','rotate','filter','brightness','contrast','saturation','sharpen','blur'], available:true, group:'editor' },
+    { name:'Design Editor', route:'design-editor.html', icon:'\u{1F3A8}', keywords:['design','thumbnail','banner','poster','flyer','invitation','wallpaper','template','text','shape','sticker','layers','instagram','youtube','profile picture'], available:true, group:'editor' },
+    { name:'Video Editor', route:'video-editor.html', icon:'\u{1F3AC}', keywords:['video','trim','split','crop video','rotate video','speed','subtitle text','overlay','editor'], available:true, group:'editor' },
+    { name:'Image Converter', route:'image-converter.html', icon:'\u{1F504}', keywords:['converter','convert','jpg','jpeg','png','webp','bmp','format','batch','compress','compression','resize'], available:true, group:'utility' },
+    { name:'History', route:'history.html', icon:'\u{1F551}', keywords:['history','recent','past','log'], available:true, group:'utility' },
+    { name:'Settings', route:'settings.html', icon:'\u2699\uFE0F', keywords:['settings','theme','dark mode','light mode','preferences','storage','about'], available:true, group:'utility' },
+    { name:'Remove Background', route:null, icon:'\u2702\uFE0F', keywords:['background','remove background','cutout'], available:true, group:'utility', note:'Already implemented (see earlier build).' },
+    { name:'Text to Image', route:null, icon:'\u2728', keywords:['text to image','generate image','ai image','prompt'], available:false, group:'ai', note:'Requires Hugging Face API access — not verified in this environment.' },
+    { name:'Image to Image', route:null, icon:'\u{1F5BC}', keywords:['image to image','style transfer'], available:false, group:'ai' },
+    { name:'4K / 8K Upscaler', route:null, icon:'\u{1F50D}', keywords:['4k','8k','upscale','upscaler','super resolution','enhance resolution'], available:false, group:'ai' },
+    { name:'Remove Object', route:null, icon:'\u{1FA84}', keywords:['remove object','inpainting','object removal'], available:false, group:'ai' },
+    { name:'AI Photo Editor', route:null, icon:'\u{1F9D9}', keywords:['ai photo editor','prompt edit','cinematic'], available:false, group:'ai' },
+    { name:'Photo Restoration', route:null, icon:'\u{1F5C2}', keywords:['restoration','restore','denoise','deblur','colorize','colorization','old photo'], available:false, group:'ai' },
+    { name:'AI Portrait', route:null, icon:'\u{1F464}', keywords:['portrait','headshot','face','segmentation'], available:false, group:'ai' },
+    { name:'AI Styles (Cartoon/Anime/etc.)', route:null, icon:'\u{1F308}', keywords:['cartoon','anime','sketch','watercolor','oil painting','comic','pixel art','vintage','cinematic','illustration','3d style','styles'], available:false, group:'ai' },
+    { name:'Image Analysis (OCR, tags, etc.)', route:null, icon:'\u{1F50E}', keywords:['ocr','image analysis','classification','object detection','caption','tags','scene recognition','image to text','image to prompt'], available:false, group:'ai' },
+    { name:'AI Video (text-to-video etc.)', route:null, icon:'\u{1F4FD}', keywords:['text to video','image to video','video captioning','scene detection','video upscaling','ai video'], available:false, group:'ai' },
+    { name:'Subtitles & Speech-to-Text', route:null, icon:'\u{1F4AC}', keywords:['subtitle','subtitles','speech to text','transcription','captions'], available:false, group:'ai' },
+    { name:'AI Assistant', route:null, icon:'\u{1F916}', keywords:['assistant','what do you want to do','ai router'], available:false, group:'ai' },
+  ];
+
+  const TEMPLATES = [
+    { name:'YouTube Thumbnail', w:1280, h:720, group:'social' },
+    { name:'YouTube Banner', w:2560, h:1440, group:'social' },
+    { name:'Instagram Post', w:1080, h:1080, group:'social' },
+    { name:'Instagram Story', w:1080, h:1920, group:'social' },
+    { name:'Poster', w:1800, h:2400, group:'print' },
+    { name:'Flyer', w:1275, h:1650, group:'print' },
+    { name:'Invitation', w:1200, h:1800, group:'print' },
+    { name:'Wallpaper', w:1920, h:1080, group:'other' },
+    { name:'Profile Picture', w:800, h:800, group:'other' },
+  ];
+
+  // ---------- Navigation ----------
+  function showScreen(name){
+    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+    document.getElementById('screen-'+name).classList.add('active');
+    document.querySelectorAll('nav.bottom button').forEach(b=>b.classList.toggle('active', b.dataset.screen===name));
+  }
+  document.getElementById('bottomNav').addEventListener('click', e=>{
+    const b = e.target.closest('button'); if(!b) return;
+    showScreen(b.dataset.screen);
+  });
+
+  // ---------- Home cards ----------
+  function cardHtml(f){
+    const badge = f.available ? '<span class="badge available">Available</span>' : '<span class="badge unavailable">Unavailable</span>';
+    const inner = `<span class="ic">${f.icon}</span><b>${f.name}</b><small>${f.note || (f.available?'Ready to use':'Needs HF network access')}</small>${badge}`;
+    if(f.route) return `<a class="card" href="${f.route}">${inner}</a>`;
+    return `<div class="card" style="opacity:.65">${inner}</div>`;
+  }
+  document.getElementById('editorCards').innerHTML = REGISTRY.filter(f=>f.group==='editor').map(cardHtml).join('');
+  document.getElementById('utilityCards').innerHTML = REGISTRY.filter(f=>f.group==='utility').map(cardHtml).join('');
+  document.getElementById('unavailableCards').innerHTML = REGISTRY.filter(f=>f.group==='ai').map(cardHtml).join('');
+
+  // ---------- Templates ----------
+  function tplHtml(t){
+    return `<a class="card" href="design-editor.html?w=${t.w}&h=${t.h}&name=${encodeURIComponent(t.name)}">
+      <div class="tpl-swatch" style="--ar:${t.w}/${t.h}"></div>
+      <b>${t.name}</b><small>${t.w} × ${t.h}</small>
+    </a>`;
+  }
+  document.getElementById('tplSocial').innerHTML = TEMPLATES.filter(t=>t.group==='social').map(tplHtml).join('');
+  document.getElementById('tplPrint').innerHTML = TEMPLATES.filter(t=>t.group==='print').map(tplHtml).join('');
+  document.getElementById('tplOther').innerHTML = TEMPLATES.filter(t=>t.group==='other').map(tplHtml).join('');
+
+  // ---------- Search ----------
+  const searchInput = document.getElementById('searchInput');
+  function runSearch(q){
+    q = q.trim().toLowerCase();
+    if(!q){ document.getElementById('searchResults').innerHTML=''; document.getElementById('noResults').style.display='none'; return; }
+    const matches = REGISTRY.filter(f=>
+      f.name.toLowerCase().includes(q) || f.keywords.some(k=>k.includes(q) || q.includes(k))
+    );
+    const wrap = document.getElementById('searchResults');
+    if(!matches.length){
+      wrap.innerHTML = '';
+      document.getElementById('noResults').style.display='block';
+      return;
+    }
+    document.getElementById('noResults').style.display='none';
+    wrap.innerHTML = matches.map(f=>{
+      const badge = f.available ? '<span class="badge available">Available</span>' : '<span class="badge unavailable">Unavailable</span>';
+      const tag = f.route ? 'a' : 'div';
+      const hrefAttr = f.route ? `href="${f.route}"` : '';
+      return `<${tag} class="result" ${hrefAttr} data-name="${f.name}">
+        <span class="ic">${f.icon}</span>
+        <div class="rinfo"><b>${f.name}</b><small>${f.note || (f.available?'Ready to use':'Needs HF network access')}</small></div>
+        ${badge}
+      </${tag}>`;
+    }).join('');
+  }
+  searchInput.addEventListener('input', ()=>{
+    runSearch(searchInput.value);
+    showScreen('search');
+  });
+  searchInput.addEventListener('focus', ()=> showScreen('search'));
+
+  window.__hubTestHooks = { REGISTRY, TEMPLATES, runSearch, showScreen };
+})();
+</script>
+</body>
+</html>
