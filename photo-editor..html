@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Photo Editor</title>
+<style>
+  :root{
+    --ink:#1c1b19; --paper:#f6f4ee; --line:#dedad0;
+    --accent:#3d5a45; --accent2:#b0521f;
+    --panel:#ffffff; --mut:#8a8578;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:'Segoe UI',system-ui,sans-serif; background:var(--paper); color:var(--ink);
+    display:flex; flex-direction:column; min-height:100vh;
+  }
+  header{
+    padding:14px 18px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between;
+    background:var(--paper); position:sticky; top:0; z-index:5;
+  }
+  header h1{ font-size:16px; margin:0; letter-spacing:.02em; font-weight:700; }
+  header h1 span{ color:var(--accent2); }
+  .top-actions{ display:flex; gap:8px; }
+  button{
+    font-family:inherit; cursor:pointer; border:1px solid var(--line); background:var(--panel); color:var(--ink);
+    border-radius:8px; padding:7px 12px; font-size:13px; transition:.15s;
+  }
+  button:hover{ border-color:var(--accent); }
+  button:disabled{ opacity:.4; cursor:not-allowed; }
+  button.primary{ background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.primary:hover{ background:#324a3a; }
+  main{ flex:1; display:flex; flex-direction:column; }
+  .canvas-wrap{
+    flex:1; display:flex; align-items:center; justify-content:center; padding:16px; min-height:280px;
+    background:
+      linear-gradient(45deg, #eee 25%, transparent 25%), linear-gradient(-45deg, #eee 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #eee 75%), linear-gradient(-45deg, transparent 75%, #eee 75%);
+    background-size:20px 20px; background-position:0 0, 0 10px, 10px -10px, -10px 0px;
+    position:relative; overflow:auto;
+  }
+  #stage{ position:relative; max-width:100%; }
+  canvas{ display:block; max-width:100%; height:auto; box-shadow:0 4px 24px rgba(0,0,0,.15); border-radius:2px; }
+  #emptyState{ text-align:center; color:var(--mut); }
+  #emptyState label{
+    display:inline-block; margin-top:10px; padding:10px 20px; background:var(--accent); color:#fff;
+    border-radius:8px; cursor:pointer; font-size:14px;
+  }
+  #beforeToggle{ position:absolute; top:10px; left:10px; }
+  .dims-badge{
+    position:absolute; bottom:10px; right:10px; background:rgba(0,0,0,.6); color:#fff; font-size:11px;
+    padding:3px 8px; border-radius:6px; font-variant-numeric:tabular-nums;
+  }
+  .tabs{ display:flex; overflow-x:auto; border-bottom:1px solid var(--line); background:var(--panel); }
+  .tab{
+    padding:10px 14px; font-size:12.5px; white-space:nowrap; cursor:pointer; color:var(--mut); border-bottom:2px solid transparent;
+  }
+  .tab.active{ color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
+  .panel{ padding:14px 16px 22px; background:var(--panel); border-top:1px solid var(--line); display:none; }
+  .panel.active{ display:block; }
+  .row{ display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+  .row label{ width:88px; font-size:12.5px; color:var(--mut); flex-shrink:0; }
+  .row input[type=range]{ flex:1; accent-color:var(--accent); }
+  .row .val{ width:40px; text-align:right; font-size:12px; color:var(--mut); font-variant-numeric:tabular-nums; }
+  .btn-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+  .btn-grid button{ padding:10px 4px; font-size:11.5px; }
+  .filter-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .filter-grid button{ padding:8px 4px; font-size:11px; }
+  .filter-grid button.active{ background:var(--accent); color:#fff; border-color:var(--accent); }
+  footer{
+    display:flex; gap:8px; padding:10px 16px; border-top:1px solid var(--line); background:var(--paper);
+    position:sticky; bottom:0;
+  }
+  footer button{ flex:1; }
+  .hint{ font-size:11px; color:var(--mut); margin-top:-4px; margin-bottom:10px; }
+  @media(min-width:820px){
+    main{ flex-direction:row; }
+    .canvas-wrap{ flex:1; }
+    .right{ width:320px; display:flex; flex-direction:column; border-left:1px solid var(--line); }
+    .tabs{ flex-wrap:wrap; }
+    .panel{ flex:1; overflow-y:auto; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Photo<span>Editor</span></h1>
+  <div class="top-actions">
+    <button id="undoBtn" title="Undo">&#8630; Undo</button>
+    <button id="redoBtn" title="Redo">&#8631; Redo</button>
+    <button id="resetBtn">Reset</button>
+  </div>
+</header>
+
+<main>
+  <div class="canvas-wrap" id="canvasWrap">
+    <div id="emptyState">
+      <div>No image loaded</div>
+      <label>Choose Image<input type="file" id="fileInput" accept="image/*" style="display:none"></label>
+    </div>
+    <div id="stage" style="display:none">
+      <button id="beforeToggle" style="display:none">Hold to compare</button>
+      <canvas id="canvas"></canvas>
+      <div class="dims-badge" id="dimsBadge"></div>
+    </div>
+  </div>
+
+  <div class="right">
+    <div class="tabs" id="tabs">
+      <div class="tab active" data-panel="adjust">Adjust</div>
+      <div class="tab" data-panel="transform">Transform</div>
+      <div class="tab" data-panel="filters">Filters</div>
+      <div class="tab" data-panel="crop">Crop</div>
+    </div>
+
+    <div class="panel active" id="panel-adjust">
+      <div class="row"><label>Brightness</label><input type="range" id="brightness" min="-100" max="100" value="0"><span class="val" id="v-brightness">0</span></div>
+      <div class="row"><label>Contrast</label><input type="range" id="contrast" min="-100" max="100" value="0"><span class="val" id="v-contrast">0</span></div>
+      <div class="row"><label>Saturation</label><input type="range" id="saturation" min="-100" max="100" value="0"><span class="val" id="v-saturation">0</span></div>
+      <div class="row"><label>Exposure</label><input type="range" id="exposure" min="-100" max="100" value="0"><span class="val" id="v-exposure">0</span></div>
+      <div class="row"><label>Temperature</label><input type="range" id="temperature" min="-100" max="100" value="0"><span class="val" id="v-temperature">0</span></div>
+      <div class="row"><label>Sharpness</label><input type="range" id="sharpness" min="0" max="100" value="0"><span class="val" id="v-sharpness">0</span></div>
+      <div class="row"><label>Blur</label><input type="range" id="blur" min="0" max="20" value="0"><span class="val" id="v-blur">0</span></div>
+      <div class="hint">Drag any slider, release to commit to history.</div>
+    </div>
+
+    <div class="panel" id="panel-transform">
+      <div class="btn-grid">
+        <button id="rotateL">Rotate &#8634;</button>
+        <button id="rotateR">Rotate &#8635;</button>
+        <button id="flipH">Flip H</button>
+        <button id="flipV">Flip V</button>
+      </div>
+      <div class="hint">Resize (px, keeps aspect):</div>
+      <div class="row"><label>Width</label><input type="number" id="resizeW" style="flex:1;padding:6px" min="1"></div>
+      <div class="row"><label>Height</label><input type="number" id="resizeH" style="flex:1;padding:6px" min="1"></div>
+      <button id="applyResize" style="width:100%">Apply Resize</button>
+    </div>
+
+    <div class="panel" id="panel-filters">
+      <div class="filter-grid" id="filterGrid">
+        <button data-f="none" class="active">None</button>
+        <button data-f="bw">B&amp;W</button>
+        <button data-f="sepia">Sepia</button>
+        <button data-f="vintage">Vintage</button>
+        <button data-f="cool">Cool</button>
+        <button data-f="warm">Warm</button>
+        <button data-f="fade">Fade</button>
+        <button data-f="noir">Noir</button>
+        <button data-f="vivid">Vivid</button>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-crop">
+      <div class="hint">Drag corners on the image to set a crop box, then apply.</div>
+      <button id="startCrop" style="width:100%;margin-bottom:8px">Enable Crop Box</button>
+      <button id="applyCrop" style="width:100%;margin-bottom:8px" disabled>Apply Crop</button>
+      <div class="btn-grid" style="grid-template-columns:repeat(3,1fr)">
+        <button data-ratio="1">1:1</button>
+        <button data-ratio="1.778">16:9</button>
+        <button data-ratio="0.75">3:4</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <label style="flex:1"><button style="width:100%" id="newImageBtn">New Image</button></label>
+  <button class="primary" id="exportBtn" style="flex:2">Export / Download</button>
+</footer>
+
+<script>
+(() => {
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const stage = document.getElementById('stage');
+  const emptyState = document.getElementById('emptyState');
+  const dimsBadge = document.getElementById('dimsBadge');
+  const fileInput = document.getElementById('fileInput');
+
+  // Source image (never mutated) + working state
+  let srcImg = null;      // HTMLImageElement, original pixels
+  let baseCanvas = document.createElement('canvas'); // holds result of transforms (rotate/flip/crop/resize)
+  let baseCtx = baseCanvas.getContext('2d');
+
+  const defaultAdjust = { brightness:0, contrast:0, saturation:0, exposure:0, temperature:0, sharpness:0, blur:0, filter:'none' };
+  let adjust = { ...defaultAdjust };
+
+  // History stack stores serialized state: dataURL of baseCanvas + adjust values
+  let history = [];
+  let historyIdx = -1;
+
+  function pushHistory(){
+    history = history.slice(0, historyIdx+1);
+    history.push({ base: baseCanvas.toDataURL('image/png'), adjust: {...adjust} });
+    historyIdx++;
+    updateUndoRedo();
+  }
+
+  function updateUndoRedo(){
+    document.getElementById('undoBtn').disabled = historyIdx <= 0;
+    document.getElementById('redoBtn').disabled = historyIdx >= history.length-1;
+  }
+
+  function restoreFromHistory(idx){
+    const entry = history[idx];
+    if(!entry) return;
+    const img = new Image();
+    img.onload = () => {
+      baseCanvas.width = img.width;
+      baseCanvas.height = img.height;
+      baseCtx.clearRect(0,0,img.width,img.height);
+      baseCtx.drawImage(img,0,0);
+      adjust = {...entry.adjust};
+      syncAdjustUI();
+      render();
+    };
+    img.src = entry.base;
+  }
+
+  function syncAdjustUI(){
+    ['brightness','contrast','saturation','exposure','temperature','sharpness','blur'].forEach(k=>{
+      document.getElementById(k).value = adjust[k];
+      document.getElementById('v-'+k).textContent = adjust[k];
+    });
+    document.querySelectorAll('#filterGrid button').forEach(b=>{
+      b.classList.toggle('active', b.dataset.f === adjust.filter);
+    });
+  }
+
+  // Load a new image
+  fileInput.addEventListener('change', e=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const img = new Image();
+    img.onload = () => {
+      srcImg = img;
+      baseCanvas.width = img.width;
+      baseCanvas.height = img.height;
+      baseCtx.clearRect(0,0,img.width,img.height);
+      baseCtx.drawImage(img,0,0);
+      adjust = {...defaultAdjust};
+      history = []; historyIdx = -1;
+      pushHistory();
+      emptyState.style.display='none';
+      stage.style.display='block';
+      syncAdjustUI();
+      render();
+    };
+    img.src = URL.createObjectURL(file);
+  });
+
+  document.getElementById('newImageBtn').addEventListener('click', ()=>{
+    if(confirm('Load a new image? Current edits will be cleared.')){
+      emptyState.style.display='block';
+      stage.style.display='none';
+      srcImg = null;
+      fileInput.value='';
+    }
+  });
+
+  // ---- Filter presets: matrix-style tint applied post-adjustment ----
+  function applyFilterPreset(imageData, name){
+    if(name==='none') return;
+    const d = imageData.data;
+    for(let i=0;i<d.length;i+=4){
+      let r=d[i], g=d[i+1], b=d[i+2];
+      switch(name){
+        case 'bw': {
+          const v = 0.299*r+0.587*g+0.114*b;
+          r=g=b=v; break;
+        }
+        case 'sepia': {
+          const nr = r*0.393+g*0.769+b*0.189;
+          const ng = r*0.349+g*0.686+b*0.168;
+          const nb = r*0.272+g*0.534+b*0.131;
+          r=nr; g=ng; b=nb; break;
+        }
+        case 'vintage': {
+          r = r*0.9+20; g = g*0.85+10; b = b*0.7;
+          break;
+        }
+        case 'cool': { b = b*1.15+10; r = r*0.92; break; }
+        case 'warm': { r = r*1.15+10; b = b*0.9; break; }
+        case 'fade': {
+          r = r*0.8+40; g = g*0.8+40; b = b*0.8+40; break;
+        }
+        case 'noir': {
+          const v = 0.299*r+0.587*g+0.114*b;
+          const c = (v-128)*1.3+128;
+          r=g=b=c; break;
+        }
+        case 'vivid': {
+          r = (r-128)*1.25+128; g=(g-128)*1.25+128; b=(b-128)*1.25+128; break;
+        }
+      }
+      d[i]=clamp(r); d[i+1]=clamp(g); d[i+2]=clamp(b);
+    }
+  }
+
+  function clamp(v){ return Math.max(0,Math.min(255,v)); }
+
+  // ---- Sharpen via 3x3 convolution ----
+  function applySharpen(imageData, amount){
+    if(amount<=0) return imageData;
+    const w = imageData.width, h = imageData.height;
+    const src = new Uint8ClampedArray(imageData.data);
+    const dst = imageData.data;
+    const strength = amount/100 * 1.0;
+    const k = [0,-1,0, -1,5,-1, 0,-1,0]; // base sharpen kernel
+    for(let y=1;y<h-1;y++){
+      for(let x=1;x<w-1;x++){
+        for(let c=0;c<3;c++){
+          let sum=0, ki=0;
+          for(let ky=-1;ky<=1;ky++){
+            for(let kx=-1;kx<=1;kx++){
+              const idx = ((y+ky)*w+(x+kx))*4+c;
+              sum += src[idx]*k[ki++];
+            }
+          }
+          const origIdx = (y*w+x)*4+c;
+          const blended = src[origIdx]*(1-strength) + sum*strength;
+          dst[origIdx] = clamp(blended);
+        }
+      }
+    }
+    return imageData;
+  }
+
+  // ---- Temperature shift ----
+  function applyTemperature(imageData, amount){
+    if(amount===0) return;
+    const d = imageData.data;
+    const shift = amount/100*40;
+    for(let i=0;i<d.length;i+=4){
+      d[i] = clamp(d[i] + shift);
+      d[i+2] = clamp(d[i+2] - shift);
+    }
+  }
+
+  // Main render pipeline: base -> pixel adjustments -> canvas filter (blur) -> draw
+  function render(){
+    if(!baseCanvas.width) return;
+    canvas.width = baseCanvas.width;
+    canvas.height = baseCanvas.height;
+
+    // Step 1: brightness/contrast/saturation/exposure via canvas filter (fast, GPU)
+    const b = 100 + adjust.brightness + adjust.exposure*0.6;
+    const c = 100 + adjust.contrast;
+    const s = 100 + adjust.saturation;
+    ctx.filter = `brightness(${b}%) contrast(${c}%) saturate(${s}%)`;
+    ctx.drawImage(baseCanvas,0,0);
+    ctx.filter = 'none';
+
+    // Step 2: pixel-level ops (temperature, sharpen, filter preset)
+    if(adjust.temperature!==0 || adjust.sharpness>0 || adjust.filter!=='none'){
+      let imageData = ctx.getImageData(0,0,canvas.width,canvas.height);
+      applyTemperature(imageData, adjust.temperature);
+      if(adjust.sharpness>0) imageData = applySharpen(imageData, adjust.sharpness);
+      applyFilterPreset(imageData, adjust.filter);
+      ctx.putImageData(imageData,0,0);
+    }
+
+    // Step 3: blur (canvas filter, re-draw)
+    if(adjust.blur>0){
+      const snapshot = document.createElement('canvas');
+      snapshot.width = canvas.width; snapshot.height = canvas.height;
+      snapshot.getContext('2d').drawImage(canvas,0,0);
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.filter = `blur(${adjust.blur}px)`;
+      ctx.drawImage(snapshot,0,0);
+      ctx.filter = 'none';
+    }
+
+    dimsBadge.textContent = `${canvas.width} × ${canvas.height}`;
+  }
+
+  // ---- Adjustment sliders ----
+  ['brightness','contrast','saturation','exposure','temperature','sharpness','blur'].forEach(key=>{
+    const el = document.getElementById(key);
+    el.addEventListener('input', ()=>{
+      adjust[key] = Number(el.value);
+      document.getElementById('v-'+key).textContent = el.value;
+      render();
+    });
+    el.addEventListener('change', ()=> pushHistory());
+  });
+
+  // ---- Filter preset buttons ----
+  document.getElementById('filterGrid').addEventListener('click', e=>{
+    const btn = e.target.closest('button');
+    if(!btn) return;
+    adjust.filter = btn.dataset.f;
+    document.querySelectorAll('#filterGrid button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    render();
+    pushHistory();
+  });
+
+  // ---- Tabs ----
+  document.getElementById('tabs').addEventListener('click', e=>{
+    const tab = e.target.closest('.tab');
+    if(!tab) return;
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-'+tab.dataset.panel).classList.add('active');
+  });
+
+  // ---- Transform: rotate / flip (bakes into baseCanvas, resets adjust-independent) ----
+  function transformBase(fn){
+    const w = baseCanvas.width, h = baseCanvas.height;
+    const tmp = document.createElement('canvas');
+    fn(tmp, w, h);
+    baseCanvas.width = tmp.width; baseCanvas.height = tmp.height;
+    baseCtx = baseCanvas.getContext('2d');
+    baseCtx.clearRect(0,0,tmp.width,tmp.height);
+    baseCtx.drawImage(tmp,0,0);
+    render();
+    pushHistory();
+  }
+
+  document.getElementById('rotateL').addEventListener('click', ()=>{
+    transformBase((tmp,w,h)=>{
+      tmp.width = h; tmp.height = w;
+      const tctx = tmp.getContext('2d');
+      tctx.translate(0,w); tctx.rotate(-Math.PI/2);
+      tctx.drawImage(baseCanvas,0,0);
+    });
+  });
+  document.getElementById('rotateR').addEventListener('click', ()=>{
+    transformBase((tmp,w,h)=>{
+      tmp.width = h; tmp.height = w;
+      const tctx = tmp.getContext('2d');
+      tctx.translate(h,0); tctx.rotate(Math.PI/2);
+      tctx.drawImage(baseCanvas,0,0);
+    });
+  });
+  document.getElementById('flipH').addEventListener('click', ()=>{
+    transformBase((tmp,w,h)=>{
+      tmp.width = w; tmp.height = h;
+      const tctx = tmp.getContext('2d');
+      tctx.translate(w,0); tctx.scale(-1,1);
+      tctx.drawImage(baseCanvas,0,0);
+    });
+  });
+  document.getElementById('flipV').addEventListener('click', ()=>{
+    transformBase((tmp,w,h)=>{
+      tmp.width = w; tmp.height = h;
+      const tctx = tmp.getContext('2d');
+      tctx.translate(0,h); tctx.scale(1,-1);
+      tctx.drawImage(baseCanvas,0,0);
+    });
+  });
+
+  // ---- Resize ----
+  const resizeW = document.getElementById('resizeW');
+  const resizeH = document.getElementById('resizeH');
+  let aspectLock = true;
+  resizeW.addEventListener('input', ()=>{
+    if(aspectLock && baseCanvas.width){
+      resizeH.value = Math.round(Number(resizeW.value) * baseCanvas.height / baseCanvas.width);
+    }
+  });
+  document.getElementById('applyResize').addEventListener('click', ()=>{
+    const nw = Number(resizeW.value), nh = Number(resizeH.value);
+    if(!nw || !nh) return alert('Enter valid width and height');
+    transformBase((tmp)=>{
+      tmp.width = nw; tmp.height = nh;
+      const tctx = tmp.getContext('2d');
+      tctx.imageSmoothingQuality = 'high';
+      tctx.drawImage(baseCanvas, 0, 0, nw, nh);
+    });
+  });
+
+  // ---- Crop (drag box on canvas) ----
+  let cropActive = false, cropBox = null, dragStart = null;
+  document.getElementById('startCrop').addEventListener('click', ()=>{
+    cropActive = !cropActive;
+    document.getElementById('startCrop').textContent = cropActive ? 'Cancel Crop Box' : 'Enable Crop Box';
+    document.getElementById('applyCrop').disabled = true;
+    cropBox = null;
+    render();
+  });
+
+  canvas.addEventListener('pointerdown', e=>{
+    if(!cropActive) return;
+    const r = canvas.getBoundingClientRect();
+    const scaleX = canvas.width/r.width, scaleY = canvas.height/r.height;
+    dragStart = { x:(e.clientX-r.left)*scaleX, y:(e.clientY-r.top)*scaleY };
+  });
+  canvas.addEventListener('pointermove', e=>{
+    if(!cropActive || !dragStart) return;
+    const r = canvas.getBoundingClientRect();
+    const scaleX = canvas.width/r.width, scaleY = canvas.height/r.height;
+    const cur = { x:(e.clientX-r.left)*scaleX, y:(e.clientY-r.top)*scaleY };
+    cropBox = {
+      x: Math.min(dragStart.x,cur.x), y: Math.min(dragStart.y,cur.y),
+      w: Math.abs(cur.x-dragStart.x), h: Math.abs(cur.y-dragStart.y)
+    };
+    render();
+    if(cropBox){
+      ctx.save();
+      ctx.strokeStyle = '#3d5a45'; ctx.lineWidth = 2; ctx.setLineDash([6,4]);
+      ctx.strokeRect(cropBox.x,cropBox.y,cropBox.w,cropBox.h);
+      ctx.restore();
+      document.getElementById('applyCrop').disabled = !(cropBox.w>4 && cropBox.h>4);
+    }
+  });
+  canvas.addEventListener('pointerup', ()=>{ dragStart=null; });
+
+  document.getElementById('applyCrop').addEventListener('click', ()=>{
+    if(!cropBox) return;
+    const {x,y,w,h} = cropBox;
+    transformBase((tmp)=>{
+      tmp.width = Math.round(w); tmp.height = Math.round(h);
+      const tctx = tmp.getContext('2d');
+      tctx.drawImage(baseCanvas, x,y,w,h, 0,0,w,h);
+    });
+    cropActive = false; cropBox = null;
+    document.getElementById('startCrop').textContent = 'Enable Crop Box';
+    document.getElementById('applyCrop').disabled = true;
+  });
+
+  document.querySelectorAll('[data-ratio]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(!baseCanvas.width) return;
+      const ratio = Number(btn.dataset.ratio);
+      let w = baseCanvas.width, h = w/ratio;
+      if(h>baseCanvas.height){ h = baseCanvas.height; w = h*ratio; }
+      cropBox = { x:(baseCanvas.width-w)/2, y:(baseCanvas.height-h)/2, w, h };
+      cropActive = true;
+      document.getElementById('startCrop').textContent = 'Cancel Crop Box';
+      document.getElementById('applyCrop').disabled = false;
+      render();
+      ctx.save();
+      ctx.strokeStyle = '#3d5a45'; ctx.lineWidth=2; ctx.setLineDash([6,4]);
+      ctx.strokeRect(cropBox.x,cropBox.y,cropBox.w,cropBox.h);
+      ctx.restore();
+    });
+  });
+
+  // ---- Before/After compare (hold button) ----
+  const beforeToggle = document.getElementById('beforeToggle');
+  function showBefore(show){
+    if(!srcImg && !history[0]) return;
+    if(show){
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      const img = new Image();
+      img.onload = ()=> ctx.drawImage(img,0,0,canvas.width,canvas.height);
+      img.src = history[0].base;
+    } else {
+      render();
+    }
+  }
+  beforeToggle.addEventListener('pointerdown', ()=>showBefore(true));
+  beforeToggle.addEventListener('pointerup', ()=>showBefore(false));
+  beforeToggle.addEventListener('pointerleave', ()=>showBefore(false));
+
+  // show the compare button once we have history
+  const origPush = pushHistory;
+  pushHistory = function(){ origPush(); beforeToggle.style.display = historyIdx>0 ? 'block':'none'; };
+
+  // ---- Undo / Redo / Reset ----
+  document.getElementById('undoBtn').addEventListener('click', ()=>{
+    if(historyIdx>0){ historyIdx--; restoreFromHistory(historyIdx); updateUndoRedo(); }
+  });
+  document.getElementById('redoBtn').addEventListener('click', ()=>{
+    if(historyIdx<history.length-1){ historyIdx++; restoreFromHistory(historyIdx); updateUndoRedo(); }
+  });
+  document.getElementById('resetBtn').addEventListener('click', ()=>{
+    if(history.length){ historyIdx=0; restoreFromHistory(0); history=history.slice(0,1); updateUndoRedo(); }
+  });
+
+  // ---- Shared local history (localStorage) ----
+  function addHistoryEntry(entry){
+    try{
+      const key = 'app_history_v1';
+      const list = JSON.parse(localStorage.getItem(key) || '[]');
+      list.unshift({ id:'H'+Date.now()+Math.random().toString(36).slice(2,7), timestamp:new Date().toISOString(), ...entry });
+      localStorage.setItem(key, JSON.stringify(list.slice(0,300)));
+    }catch(e){ /* localStorage unavailable — history simply won't record */ }
+  }
+
+  // ---- Export (real download of the actual edited pixels) ----
+  document.getElementById('exportBtn').addEventListener('click', ()=>{
+    if(!baseCanvas.width) return alert('Load an image first');
+    canvas.toBlob(blob=>{
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'edited-photo.png';
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      addHistoryEntry({ filename:'edited-photo.png', operation:'Photo Edit', outputFormat:'PNG', dimensions:`${canvas.width}×${canvas.height}`, status:'Complete' });
+    }, 'image/png');
+  });
+
+  updateUndoRedo();
+})();
+</script>
+</body>
+</html>
