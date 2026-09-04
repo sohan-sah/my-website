@@ -1,26 +1,32 @@
-// api/hd-enhance.js — POST raw image bytes, returns a 2x super-resolved PNG.
+// api/hd-enhance.js — accepts multipart/form-data (field "image"), returns
+// a 2x super-resolved PNG.
 // STATUS: real code, UNTESTED (see api/_hf.js header).
-const { readRawBody, callHfImageModel } = require('./_hf');
+const { readRawBody, parseMultipartFile, callHfImageModel } = require('./_hf');
 
 const MODEL = 'caidas/swin2SR-classical-sr-x2-64'; // verify still served by an Inference Provider
 
 module.exports = async (req, res) => {
   if (req.method !== 'POST') {
-    res.status(405).json({ error: 'Use POST with the image as the request body.' });
+    res.status(405).json({ error: 'Use POST with multipart/form-data (field "image").' });
     return;
   }
   try {
-    const input = await readRawBody(req);
-    if (!input.length) {
-      res.status(400).json({ error: 'No image data received.' });
+    const contentType = req.headers['content-type'] || '';
+    if (!contentType.startsWith('multipart/form-data')) {
+      res.status(400).json({ error: 'Expected multipart/form-data with an "image" field.' });
       return;
     }
-    if (input.length > 10 * 1024 * 1024) {
+    const raw = await readRawBody(req);
+    const file = parseMultipartFile(raw, contentType);
+    if (!file.buffer.length) {
+      res.status(400).json({ error: 'Uploaded file is empty.' });
+      return;
+    }
+    if (file.buffer.length > 10 * 1024 * 1024) {
       res.status(400).json({ error: 'Image too large (max 10MB).' });
       return;
     }
-    const contentType = req.headers['content-type'] || 'application/octet-stream';
-    const { buffer, contentType: outType } = await callHfImageModel(MODEL, input, contentType);
+    const { buffer, contentType: outType } = await callHfImageModel(MODEL, file.buffer, file.mimeType);
     res.setHeader('Content-Type', outType);
     res.status(200).send(buffer);
   } catch (err) {
