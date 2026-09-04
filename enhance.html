@@ -20,6 +20,12 @@
   .dropzone{ border:2px dashed var(--line); border-radius:12px; padding:22px 14px; text-align:center; color:var(--mut); margin-bottom:12px; }
   .dropzone label{ display:inline-block; margin-top:8px; padding:8px 16px; background:var(--accent); color:#fff; border-radius:8px; cursor:pointer; font-size:13px; }
   input[type=file]{ display:none; }
+  .file-preview{ display:none; margin-bottom:12px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px; }
+  .file-preview.show{ display:flex; gap:10px; align-items:center; }
+  .file-preview img{ width:64px; height:64px; object-fit:cover; border-radius:8px; flex-shrink:0; background:#eee; }
+  .file-preview .fp-info{ min-width:0; }
+  .file-preview .fp-name{ font-size:12.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .file-preview .fp-dims{ font-size:11.5px; color:var(--mut); }
   textarea{ width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font-family:inherit; font-size:13.5px; min-height:70px; resize:vertical; }
   .row{ display:flex; gap:8px; margin:10px 0; }
   .row input[type=number]{ flex:1; padding:8px; border:1px solid var(--line); border-radius:8px; font-family:inherit; }
@@ -51,18 +57,22 @@
   <!-- HD / 4K / 8K / Background removal share the same upload+run pattern -->
   <div class="tool active" data-tool="hd">
     <div class="dropzone"><div>Upload an image to enhance</div><label>Choose Image<input type="file" accept="image/*" class="imgInput" data-endpoint="/api/hd-enhance"></label></div>
+    <div class="file-preview"><img><div class="fp-info"><div class="fp-name"></div><div class="fp-dims"></div></div></div>
     <button class="run" disabled>Run HD Enhance</button>
   </div>
   <div class="tool" data-tool="up4k">
     <div class="dropzone"><div>Upload an image to upscale to 4K</div><label>Choose Image<input type="file" accept="image/*" class="imgInput" data-endpoint="/api/upscale?tier=4k"></label></div>
+    <div class="file-preview"><img><div class="fp-info"><div class="fp-name"></div><div class="fp-dims"></div></div></div>
     <button class="run" disabled>Run 4K Upscale</button>
   </div>
   <div class="tool" data-tool="up8k">
     <div class="dropzone"><div>Upload an image to upscale to 8K (2-stage)</div><label>Choose Image<input type="file" accept="image/*" class="imgInput" data-endpoint="/api/upscale?tier=8k"></label></div>
+    <div class="file-preview"><img><div class="fp-info"><div class="fp-name"></div><div class="fp-dims"></div></div></div>
     <button class="run" disabled>Run 8K Upscale</button>
   </div>
   <div class="tool" data-tool="bg">
     <div class="dropzone"><div>Upload an image to remove its background</div><label>Choose Image<input type="file" accept="image/*" class="imgInput" data-endpoint="/api/remove-background"></label></div>
+    <div class="file-preview"><img><div class="fp-info"><div class="fp-name"></div><div class="fp-dims"></div></div></div>
     <button class="run" disabled>Remove Background</button>
   </div>
 
@@ -96,27 +106,43 @@
     const input = toolEl.querySelector('.imgInput');
     if (!input) return;
     const runBtn = toolEl.querySelector('.run');
+    const preview = toolEl.querySelector('.file-preview');
     let file = null;
 
-    input.addEventListener('change', e => {
+    // 1+2+3: picker opens natively via the <label>/<input>; on selection,
+    // show a REAL local preview (object URL + naturalWidth/Height) with
+    // zero network activity — nothing is sent until Run is pressed.
+    input.addEventListener('change', async e => {
       file = e.target.files[0] || null;
       runBtn.disabled = !file;
+      if (!file) { preview.classList.remove('show'); return; }
+      const dims = await readImageDims(file);
+      preview.querySelector('img').src = URL.createObjectURL(file);
+      preview.querySelector('.fp-name').textContent = file.name;
+      preview.querySelector('.fp-dims').textContent = `${dims.w}×${dims.h} · ${(file.size/1024).toFixed(0)} KB`;
+      preview.classList.add('show');
+      document.getElementById('resultArea').innerHTML = '';
     });
 
+    // 5: only on Run does the actual selected File get sent, as real
+    // multipart/form-data (browser sets the correct boundary itself —
+    // never set Content-Type manually for FormData).
     runBtn.addEventListener('click', async () => {
       if (!file) return;
       runBtn.disabled = true;
       showStatus('Sending image to the server for real processing...', 'info');
-      const srcW_H = await readImageDims(file);
+      const srcDims = await readImageDims(file);
       try {
-        const res = await fetch(input.dataset.endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': file.type || 'application/octet-stream' },
-          body: file,
-        });
+        const formData = new FormData();
+        formData.append('image', file, file.name);
+        const res = await fetch(input.dataset.endpoint, { method: 'POST', body: formData });
         if (!res.ok) {
+          // 11: surface the REAL server-provided error, not a generic message.
           const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || `Request failed (${res.status})`);
+          const detailText = err.detail
+            ? (typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail))
+            : '';
+          throw new Error((err.error || `Request failed (${res.status})`) + (detailText ? ' — ' + detailText : ''));
         }
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
@@ -124,7 +150,7 @@
         document.getElementById('resultArea').innerHTML = `
           <div class="status ok">Done — real response received from the server.</div>
           <div class="preview"><img src="${url}"></div>
-          <div class="dims">Original: ${srcW_H.w}×${srcW_H.h} &nbsp;→&nbsp; Result: ${outDims.w}×${outDims.h}</div>
+          <div class="dims">Original: ${srcDims.w}×${srcDims.h} &nbsp;→&nbsp; Result: ${outDims.w}×${outDims.h}</div>
           <a class="download" href="${url}" download="result.png">Download Result</a>
         `;
       } catch (err) {
@@ -164,7 +190,8 @@
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `Request failed (${res.status})`);
+        const detailText = err.detail ? (typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail)) : '';
+        throw new Error((err.error || `Request failed (${res.status})`) + (detailText ? ' — ' + detailText : ''));
       }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
