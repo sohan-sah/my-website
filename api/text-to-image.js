@@ -40,8 +40,9 @@ module.exports = async (req, res) => {
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60_000);
+  let hfRes;
   try {
-    const hfRes = await fetch(HF_ENDPOINT, {
+    hfRes = await fetch(HF_ENDPOINT, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'image/png' },
       body: JSON.stringify({
@@ -50,8 +51,22 @@ module.exports = async (req, res) => {
       }),
       signal: controller.signal,
     });
+  } catch (networkErr) {
     clearTimeout(timeout);
+    if (networkErr.name === 'AbortError') {
+      res.status(504).json({ error: 'Request to provider timed out.' });
+      return;
+    }
+    const cause = networkErr.cause;
+    res.status(502).json({
+      error: 'Could not reach Hugging Face: ' + (cause ? `${cause.code || cause.name || ''} ${cause.message || ''}`.trim() : networkErr.message),
+      detail: { originalMessage: networkErr.message, cause: cause ? String(cause) : null },
+    });
+    return;
+  }
+  clearTimeout(timeout);
 
+  try {
     if (hfRes.status === 503) {
       const info = await hfRes.json().catch(() => null);
       res.status(503).json({ error: 'Model is loading on the provider. Retry shortly.', estimated_time: info && info.estimated_time });
@@ -79,8 +94,6 @@ module.exports = async (req, res) => {
     res.setHeader('Content-Type', ct);
     res.status(200).send(buf);
   } catch (err) {
-    clearTimeout(timeout);
-    if (err.name === 'AbortError') { res.status(504).json({ error: 'Request to provider timed out.' }); return; }
     res.status(500).json({ error: 'Unexpected server error.', detail: err.message });
   }
 };
