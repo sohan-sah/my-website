@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>History</title>
+<style>
+  :root{ --ink:#1c1b19; --paper:#f6f4ee; --line:#dedad0; --accent:#3d5a45; --accent2:#b0521f; --panel:#ffffff; --mut:#8a8578; --bad:#a8402c; }
+  *{box-sizing:border-box;}
+  body{ margin:0; font-family:'Segoe UI',system-ui,sans-serif; background:var(--paper); color:var(--ink); }
+  header{ padding:12px 16px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; background:var(--paper); }
+  header h1{ font-size:15px; margin:0; font-weight:700; } header h1 span{ color:var(--accent2); }
+  .notice{ font-size:11px; color:var(--mut); padding:8px 16px; background:#f0ede4; border-bottom:1px solid var(--line); }
+  button{ font-family:inherit; cursor:pointer; border:1px solid var(--line); background:var(--panel); color:var(--ink); border-radius:8px; padding:7px 12px; font-size:12.5px; }
+  button:hover{ border-color:var(--accent); }
+  button.danger{ color:var(--bad); border-color:var(--bad); }
+  main{ padding:14px; max-width:640px; margin:0 auto; }
+  .entry{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:8px; display:flex; align-items:center; gap:10px; }
+  .entry .info{ flex:1; min-width:0; }
+  .entry .name{ font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .entry .meta{ font-size:11px; color:var(--mut); }
+  .entry .actions{ display:flex; gap:6px; flex-shrink:0; }
+  .entry .actions button{ padding:5px 8px; font-size:11px; }
+  #empty{ text-align:center; color:var(--mut); padding:40px 20px; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Local<span>History</span></h1>
+  <button id="clearAllBtn" class="danger">Clear History</button>
+</header>
+<div class="notice">This history is stored only in this browser's local storage on this device. It is not uploaded anywhere.</div>
+<main>
+  <div id="list"></div>
+  <div id="empty" style="display:none">No history yet. Actions from the editors and converter will appear here.</div>
+</main>
+
+<script>
+(() => {
+  const KEY = 'app_history_v1';
+  function load(){ try{ return JSON.parse(localStorage.getItem(KEY) || '[]'); }catch(e){ return []; } }
+  function save(list){ localStorage.setItem(KEY, JSON.stringify(list)); }
+
+  function render(){
+    const list = load();
+    const wrap = document.getElementById('list');
+    const empty = document.getElementById('empty');
+    wrap.innerHTML = '';
+    if(!list.length){ empty.style.display='block'; return; }
+    empty.style.display='none';
+    list.forEach(e=>{
+      const el = document.createElement('div');
+      el.className = 'entry';
+      const dt = new Date(e.timestamp);
+      el.innerHTML = `
+        <div class="info">
+          <div class="name">${escapeHtml(e.filename||'(untitled)')}</div>
+          <div class="meta">${escapeHtml(e.operation||'')} · ${escapeHtml(e.outputFormat||'')} · ${escapeHtml(e.dimensions||'')} · ${dt.toLocaleString()} · ${escapeHtml(e.status||'')}</div>
+        </div>
+        <div class="actions">
+          <button data-act="del" data-id="${e.id}">Delete</button>
+        </div>`;
+      el.querySelector('[data-act=del]').addEventListener('click', ()=>{
+        save(load().filter(x=>x.id!==e.id));
+        render();
+      });
+      wrap.appendChild(el);
+    });
+  }
+  function escapeHtml(s){ return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+  document.getElementById('clearAllBtn').addEventListener('click', ()=>{
+    if(confirm('Clear all local history? This cannot be undone.')){
+      save([]); render();
+    }
+  });
+
+  window.__historyTestHooks = { load, save, render, KEY };
+  render();
+})();
+</script>
+</body>
+</html>
