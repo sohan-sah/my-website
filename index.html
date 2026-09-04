@@ -28,6 +28,7 @@
   .result small{ color:var(--mut); font-size:11px; }
   .badge{ font-size:9.5px; padding:2px 6px; border-radius:8px; flex-shrink:0; }
   .badge.available{ background:#dcead8; color:var(--accent); }
+  .badge.untested{ background:#fde9d2; color:var(--accent2); }
   .badge.unavailable{ background:#f0ede4; color:var(--mut); }
   #noResults{ text-align:center; color:var(--mut); padding:30px 10px; font-size:13px; }
 
@@ -109,9 +110,11 @@
     { name:'History', route:'history.html', icon:'\u{1F551}', keywords:['history','recent','past','log'], available:true, group:'utility' },
     { name:'Settings', route:'settings.html', icon:'\u2699\uFE0F', keywords:['settings','theme','dark mode','light mode','preferences','storage','about'], available:true, group:'utility' },
     { name:'Remove Background', route:null, icon:'\u2702\uFE0F', keywords:['background','remove background','cutout'], available:true, group:'utility', note:'Already implemented (see earlier build).' },
-    { name:'Text to Image', route:null, icon:'\u2728', keywords:['text to image','generate image','ai image','prompt'], available:false, group:'ai', note:'Requires Hugging Face API access — not verified in this environment.' },
+    { name:'HD Enhance', route:'enhance.html', icon:'\u2728', keywords:['hd','enhance','sharpen','quality'], available:'untested', group:'ai', note:'Real API code exists — untested, HF unreachable from this build environment.' },
+    { name:'4K Upscale', route:'enhance.html', icon:'\u{1F50D}', keywords:['4k','upscale','upscaler','super resolution'], available:'untested', group:'ai', note:'Real API code exists — untested, HF unreachable from this build environment.' },
+    { name:'8K Upscale', route:'enhance.html', icon:'\u{1F50D}', keywords:['8k','upscale','upscaler','super resolution'], available:'untested', group:'ai', note:'Real API code exists — untested, HF unreachable from this build environment.' },
+    { name:'Text to Image', route:'enhance.html', icon:'\u2728', keywords:['text to image','generate image','ai image','prompt'], available:'untested', group:'ai', note:'Real API code exists — untested, HF unreachable from this build environment.' },
     { name:'Image to Image', route:null, icon:'\u{1F5BC}', keywords:['image to image','style transfer'], available:false, group:'ai' },
-    { name:'4K / 8K Upscaler', route:null, icon:'\u{1F50D}', keywords:['4k','8k','upscale','upscaler','super resolution','enhance resolution'], available:false, group:'ai' },
     { name:'Remove Object', route:null, icon:'\u{1FA84}', keywords:['remove object','inpainting','object removal'], available:false, group:'ai' },
     { name:'AI Photo Editor', route:null, icon:'\u{1F9D9}', keywords:['ai photo editor','prompt edit','cinematic'], available:false, group:'ai' },
     { name:'Photo Restoration', route:null, icon:'\u{1F5C2}', keywords:['restoration','restore','denoise','deblur','colorize','colorization','old photo'], available:false, group:'ai' },
@@ -148,8 +151,10 @@
 
   // ---------- Home cards ----------
   function cardHtml(f){
-    const badge = f.available ? '<span class="badge available">Available</span>' : '<span class="badge unavailable">Unavailable</span>';
-    const inner = `<span class="ic">${f.icon}</span><b>${f.name}</b><small>${f.note || (f.available?'Ready to use':'Needs HF network access')}</small>${badge}`;
+    const badge = f.available===true ? '<span class="badge available">Available</span>'
+      : f.available==='untested' ? '<span class="badge untested">Untested</span>'
+      : '<span class="badge unavailable">Unavailable</span>';
+    const inner = `<span class="ic">${f.icon}</span><b>${f.name}</b><small>${f.note || (f.available===true?'Ready to use':'Needs HF network access')}</small>${badge}`;
     if(f.route) return `<a class="card" href="${f.route}">${inner}</a>`;
     return `<div class="card" style="opacity:.65">${inner}</div>`;
   }
@@ -184,12 +189,14 @@
     }
     document.getElementById('noResults').style.display='none';
     wrap.innerHTML = matches.map(f=>{
-      const badge = f.available ? '<span class="badge available">Available</span>' : '<span class="badge unavailable">Unavailable</span>';
+      const badge = f.available===true ? '<span class="badge available">Available</span>'
+        : f.available==='untested' ? '<span class="badge untested">Untested</span>'
+        : '<span class="badge unavailable">Unavailable</span>';
       const tag = f.route ? 'a' : 'div';
       const hrefAttr = f.route ? `href="${f.route}"` : '';
       return `<${tag} class="result" ${hrefAttr} data-name="${f.name}">
         <span class="ic">${f.icon}</span>
-        <div class="rinfo"><b>${f.name}</b><small>${f.note || (f.available?'Ready to use':'Needs HF network access')}</small></div>
+        <div class="rinfo"><b>${f.name}</b><small>${f.note || (f.available===true?'Ready to use':'Needs HF network access')}</small></div>
         ${badge}
       </${tag}>`;
     }).join('');
