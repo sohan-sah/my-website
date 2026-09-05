@@ -1,7 +1,15 @@
 // api/_hf.js — shared helper, imported by the other /api/*.js functions.
 // Runs server-side only on Vercel. Never imported by client code.
+//
+// Uses the current Hugging Face Inference Providers SDK (@huggingface/inference),
+// NOT the decommissioned https://api-inference.huggingface.co endpoint. The
+// SDK itself talks to https://router.huggingface.co and picks the correct
+// provider-specific request/response protocol per model — that per-provider
+// protocol difference (raw bytes vs base64 vs URL vs polling) is exactly why
+// a hand-rolled fetch to a single hardcoded host broke.
+import { InferenceClient } from '@huggingface/inference';
 
-function readRawBody(req) {
+export function readRawBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     req.on('data', c => chunks.push(c));
@@ -13,8 +21,9 @@ function readRawBody(req) {
 // Parses a single-file multipart/form-data body (field name doesn't matter —
 // returns the first file part found). No external dependencies: does a
 // byte-accurate split on the boundary using Buffer.indexOf, so binary image
-// data is never corrupted by string re-encoding.
-function parseMultipartFile(buffer, contentTypeHeader) {
+// data is never corrupted by string re-encoding. (Unchanged by this update —
+// this only concerns the browser -> our server upload, not our server -> HF.)
+export function parseMultipartFile(buffer, contentTypeHeader) {
   const m = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(contentTypeHeader || '');
   const boundary = m && (m[1] || m[2]);
   if (!boundary) {
@@ -39,7 +48,6 @@ function parseMultipartFile(buffer, contentTypeHeader) {
     const filenameMatch = /filename="([^"]*)"/i.exec(headers);
     const typeMatch = /Content-Type:\s*([^\r\n]+)/i.exec(headers);
     let body = part.slice(headerEnd + 4);
-    // strip the trailing \r\n that precedes the next boundary marker
     if (body.slice(-2).toString('latin1') === '\r\n') body = body.slice(0, -2);
     return {
       filename: filenameMatch ? filenameMatch[1] : 'upload',
@@ -52,92 +60,41 @@ function parseMultipartFile(buffer, contentTypeHeader) {
   throw err;
 }
 
-// Calls a Hugging Face inference model with a binary image body.
-// STATUS: real code, UNTESTED from this build sandbox — its network egress
-// blocks huggingface.co / api-inference.huggingface.co (confirmed:
-// "host_not_allowed"), so this has never completed a real request here.
-// On a real deployment, any network-level failure (DNS, TLS, the endpoint
-// having moved, etc.) is now surfaced with its actual cause below instead
-// of a bare "fetch failed".
-async function callHfImageModel(modelId, inputBuffer, contentType) {
+// Returns an authenticated InferenceClient. HF_TOKEN is read server-side
+// only (process.env.HF_TOKEN) and is never sent to the browser.
+export function getClient() {
   const token = process.env.HF_TOKEN;
   if (!token) {
     const err = new Error('Server is not configured with HF_TOKEN.');
     err.statusCode = 500;
     throw err;
   }
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 55_000);
-  let res;
-  try {
-    res = await fetch(`https://api-inference.huggingface.co/models/${modelId}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': contentType || 'application/octet-stream',
-        Accept: 'image/png',
-      },
-      body: inputBuffer,
-      signal: controller.signal,
-    });
-  } catch (networkErr) {
-    clearTimeout(timeout);
-    if (networkErr.name === 'AbortError') {
-      const err = new Error('Request to Hugging Face timed out after 55s.');
-      err.statusCode = 504;
-      throw err;
-    }
-    // Surface the REAL cause (e.g. ENOTFOUND, ECONNREFUSED, certificate
-    // error) instead of the generic "fetch failed" wrapper message.
-    const cause = networkErr.cause;
-    const err = new Error(
-      'Could not reach Hugging Face: ' +
-      (cause ? `${cause.code || cause.name || ''} ${cause.message || ''}`.trim() : networkErr.message)
-    );
-    err.statusCode = 502;
-    err.detail = { originalMessage: networkErr.message, cause: cause ? String(cause) : null };
-    throw err;
-  }
-  clearTimeout(timeout);
-
-  if (res.status === 503) {
-    const info = await res.json().catch(() => null);
-    const err = new Error('Model is loading on the provider. Retry shortly.');
-    err.statusCode = 503;
-    err.detail = info;
-    throw err;
-  }
-  if (res.status === 401 || res.status === 403) {
-    const err = new Error('Authentication with Hugging Face failed (check HF_TOKEN).');
-    err.statusCode = 502;
-    throw err;
-  }
-  if (res.status === 404) {
-    const err = new Error(`Model "${modelId}" was not found by the inference provider.`);
-    err.statusCode = 502;
-    throw err;
-  }
-  if (res.status === 429) {
-    const err = new Error('Rate limited by the inference provider.');
-    err.statusCode = 429;
-    throw err;
-  }
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    const err = new Error(`Provider returned an error (${res.status}).`);
-    err.statusCode = 502;
-    err.detail = text.slice(0, 500);
-    throw err;
-  }
-  const ct = res.headers.get('content-type') || '';
-  const buf = Buffer.from(await res.arrayBuffer());
-  if (!ct.startsWith('image/') || buf.length === 0) {
-    const err = new Error('Provider did not return a valid image.');
-    err.statusCode = 502;
-    err.detail = ct;
-    throw err;
-  }
-  return { buffer: buf, contentType: ct };
+  return new InferenceClient(token);
 }
 
-module.exports = { readRawBody, parseMultipartFile, callHfImageModel };
+// Normalizes any error from the SDK (network failure, provider error,
+// auth error) into a {statusCode, error, detail} shape the API routes can
+// send back — the REAL cause is always kept, never hidden behind a
+// generic message.
+// STATUS: real code, UNTESTED from this build sandbox — its network egress
+// blocks both huggingface.co and registry.npmjs.org (confirmed:
+// "host_not_allowed" on both), so this SDK has never been installed or
+// called here. Verify with a live HF_TOKEN on Vercel before trusting output.
+export function toApiError(err) {
+  if (err.statusCode) return { statusCode: err.statusCode, error: err.message };
+
+  const cause = err.cause;
+  if (cause || /fetch failed/i.test(err.message || '')) {
+    return {
+      statusCode: 502,
+      error: 'Could not reach Hugging Face: ' +
+        (cause ? `${cause.code || cause.name || ''} ${cause.message || ''}`.trim() : err.message),
+      detail: { originalMessage: err.message, cause: cause ? String(cause) : null },
+    };
+  }
+  return {
+    statusCode: err.httpResponse?.status || 502,
+    error: err.message || 'Unexpected error calling Hugging Face.',
+    detail: err.name,
+  };
+}
