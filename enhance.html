@@ -37,6 +37,7 @@
   .status.info{ background:#f0ede4; color:var(--mut); }
   .status.error{ background:#f6d9d3; color:var(--bad); }
   .status.ok{ background:#dcead8; color:var(--accent); }
+  .status.unavailable{ background:#f0ede4; color:var(--accent2); }
   .dims{ font-size:11.5px; color:var(--mut); margin-top:6px; }
   a.download{ display:block; text-align:center; margin-top:10px; padding:9px; background:var(--accent2); color:#fff; border-radius:8px; text-decoration:none; font-size:13px; }
 </style>
@@ -137,8 +138,12 @@
         formData.append('image', file, file.name);
         const res = await fetch(input.dataset.endpoint, { method: 'POST', body: formData });
         if (!res.ok) {
-          // 11: surface the REAL server-provided error, not a generic message.
           const err = await res.json().catch(() => ({}));
+          if (res.status === 501 && err.available === false) {
+            showStatus(err.error || 'AI Upscale temporarily unavailable', 'unavailable');
+            return;
+          }
+          // 11: surface the REAL server-provided error, not a generic message.
           const detailText = err.detail
             ? (typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail))
             : '';
@@ -147,10 +152,15 @@
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const outDims = await readImageDims(blob);
+        const isMask = res.headers.get('X-Result-Kind') === 'segmentation-mask';
+        const noteHtml = isMask
+          ? '<div class="dims" style="margin-top:2px">Note: this is a foreground/background mask (white = subject), not yet a composited transparent cutout.</div>'
+          : '';
         document.getElementById('resultArea').innerHTML = `
           <div class="status ok">Done — real response received from the server.</div>
           <div class="preview"><img src="${url}"></div>
           <div class="dims">Original: ${srcDims.w}×${srcDims.h} &nbsp;→&nbsp; Result: ${outDims.w}×${outDims.h}</div>
+          ${noteHtml}
           <a class="download" href="${url}" download="result.png">Download Result</a>
         `;
       } catch (err) {
