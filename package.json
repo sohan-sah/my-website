@@ -1,0 +1,6 @@
+{
+  "type": "module",
+  "dependencies": {
+    "@huggingface/inference": "^3.0.0"
+  }
+}
