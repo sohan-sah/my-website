@@ -2,15 +2,17 @@
 // returns a foreground segmentation mask from the current Hugging Face
 // Inference Providers routing (not the decommissioned
 // api-inference.huggingface.co endpoint).
-// STATUS: real code, UNTESTED (see api/_hf.js header).
+// STATUS: real code, now REAL-TESTED on live Vercel — the previous
+// hardcoded provider="fal-ai" was proven wrong by an actual router
+// response: "Task 'image-segmentation' not supported for provider
+// 'fal-ai'. Available tasks: text-to-image, text-to-speech, text-to-video,
+// automatic-speech-recognition." That live response overrides the static
+// docs snippet this was based on — provider is no longer hardcoded; the
+// SDK is left to auto-select whichever provider currently serves this
+// model+task, per this task's own "prefer auto unless documented
+// otherwise" rule (the documented reason for fal-ai just failed live).
 //
-// MODEL AUDIT (this update): switched from briaai/RMBG-1.4 (provider
-// support unverified) to briaai/RMBG-2.0, which HF's own current official
-// "image-segmentation" Inference Providers task docs page explicitly maps
-// to the fal-ai provider (providersMapping: {"fal-ai":{"modelId":
-// "briaai/RMBG-2.0","providerModelId":"fal-ai/bria/background/remove"}}).
-// This is the most directly-sourced confirmation available for any of the
-// 4 image tools.
+// MODEL: briaai/RMBG-2.0 (unchanged — only the provider was wrong).
 //
 // KNOWN LIMITATION: the image-segmentation task's response schema is a
 // list of {mask, label, score} elements (a base64 PNG mask per class), not
@@ -25,7 +27,6 @@
 import { readRawBody, parseMultipartFile, getClient, toApiError } from './_hf.js';
 
 const MODEL = 'briaai/RMBG-2.0';
-const PROVIDER = 'fal-ai'; // per HF's documented providersMapping for this exact model+task
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -46,7 +47,6 @@ export default async function handler(req, res) {
     const client = getClient();
     const segments = await client.imageSegmentation({
       model: MODEL,
-      provider: PROVIDER,
       data: new Blob([file.buffer], { type: file.mimeType }),
     });
 
