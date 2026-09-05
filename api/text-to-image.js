@@ -1,15 +1,22 @@
 // api/text-to-image.js — POST { prompt, negative_prompt?, width?, height? }
 // JSON, returns a generated image.
-// Uses the current @huggingface/inference SDK (not the decommissioned
-// api-inference.huggingface.co endpoint).
+// Uses the current @huggingface/inference SDK (router.huggingface.co),
+// NOT the decommissioned api-inference.huggingface.co endpoint.
 // STATUS: real code, UNTESTED (see api/_hf.js header).
-// MODEL/PROVIDER: black-forest-labs/FLUX.1-schnell via the "hf-inference"
-// provider is a combination documented as working with this exact SDK call
-// (huggingface.co current docs/examples) — the most-verified choice among
-// the 5 tools, though still not tested live from this sandbox.
+//
+// MODEL AUDIT (this update): black-forest-labs/FLUX.1-schnell produced a
+// live error — "no inference provider information" — so it is NOT
+// currently served. Replaced with black-forest-labs/FLUX.1-dev, which is
+// HF's own current flagship example for this exact SDK call on the main
+// Inference Providers docs page (huggingface.co/docs/inference-providers),
+// and is independently confirmed by Black Forest Labs' own model page as
+// live on multiple current partner providers (fal.ai, Replicate, DeepInfra,
+// TogetherAI, and others). Provider is left unset (provider="auto"
+// behavior) per that same canonical example — no documented reason found
+// to hardcode one provider over another for this model.
 import { readRawBody, getClient, toApiError } from './_hf.js';
 
-const MODEL = 'black-forest-labs/FLUX.1-schnell';
+const MODEL = 'black-forest-labs/FLUX.1-dev';
 
 function clampDim(v, fallback) {
   const n = Number(v) || fallback;
@@ -42,7 +49,6 @@ export default async function handler(req, res) {
     const client = getClient();
     const result = await client.textToImage({
       model: MODEL,
-      provider: 'hf-inference',
       inputs: prompt,
       parameters: {
         negative_prompt: body.negative_prompt || undefined,
@@ -57,6 +63,16 @@ export default async function handler(req, res) {
     res.status(200).send(buf);
   } catch (err) {
     const e = toApiError(err);
+    // FLUX.1-dev is gated behind accepting the model's license on
+    // huggingface.co — surface that specific, actionable cause rather than
+    // a generic provider error if the SDK reports it.
+    if (/gated|access|license|permission/i.test(e.error || '')) {
+      res.status(403).json({
+        error: 'This model requires accepting its license on huggingface.co with the account tied to HF_TOKEN before it can be used, or your token lacks Inference Providers access.',
+        detail: e.error,
+      });
+      return;
+    }
     res.status(e.statusCode).json({ error: e.error, detail: e.detail });
   }
 }
