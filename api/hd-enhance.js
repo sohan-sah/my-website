@@ -1,54 +1,34 @@
 // api/hd-enhance.js — HD Enhance (super-resolution / quality enhancement).
 //
-// MODEL AUDIT HISTORY: caidas/swin2SR-classical-sr-x2-64 had no confirmed
-// current Inference Provider mapping, and HF's "image-to-image" task docs
-// only recommend prompt-guided editing models, not plain enhancers — so
-// this was marked honestly unavailable.
+// MODEL AUDIT HISTORY (2 real live failures so far — no more guessing):
+// 1. caidas/swin2SR-classical-sr-x2-64 — failed live: "No Inference
+//    Provider available for model...".
+// 2. fal/AuraSR-v2 — also failed live, same error: "No Inference Provider
+//    available for model fal/AuraSR-v2." (This was a reasonable-looking
+//    candidate — published under fal's own HF org, tagged
+//    super-resolution — but live testing is the only real confirmation,
+//    and it came back negative.)
 //
-// THIS UPDATE (still UNVERIFIED — read before trusting):
-// Using the same candidate as api/upscale.js: fal/AuraSR-v2, a 4x
-// super-resolution model published under fal's own HF org (real signal:
-// not a third-party mirror; tagged super-resolution; 200+ likes) —
-// but its live availability via serverless Inference Providers (as
-// opposed to HF's separate paid Inference Endpoints product) could not be
-// confirmed from this sandbox. It only exposes a single upscale factor
-// (4x per its own documented usage), so "HD Enhance" here is the same
-// underlying operation as one pass of "4K Upscale" — there is no separate
-// lighter-touch model currently known to be available. If this turns out
-// not to be live, expect the same kind of real "no provider available"
-// error as the previous swin2SR attempt — that would be honest
-// information, not a bug in this code.
-import { readRawBody, parseMultipartFile, getClient, toApiError } from './_hf.js';
-
-const MODEL = 'fal/AuraSR-v2';
-
+// Conclusion: no currently free/serverless-provider-backed plain
+// super-resolution model has been found after two real attempts. Per this
+// task's own explicit instruction, this is honestly reported as
+// unavailable rather than guessing a third model and risking another
+// failed round-trip.
+//
+// Before trying again: check a candidate model's own
+// "Inference Providers" widget on huggingface.co yourself first (Deploy ->
+// Inference Providers on the model page) to confirm a provider is
+// actually listed as live, THEN replace the response below with a real
+// client.imageToImage() call (see api/remove-background.js for the
+// current SDK call pattern).
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Use POST with multipart/form-data (field "image").' });
     return;
   }
-  try {
-    const contentType = req.headers['content-type'] || '';
-    if (!contentType.startsWith('multipart/form-data')) {
-      res.status(400).json({ error: 'Expected multipart/form-data with an "image" field.' });
-      return;
-    }
-    const raw = await readRawBody(req);
-    const file = parseMultipartFile(raw, contentType);
-    if (!file.buffer.length) { res.status(400).json({ error: 'Uploaded file is empty.' }); return; }
-    if (file.buffer.length > 10 * 1024 * 1024) { res.status(400).json({ error: 'Image too large (max 10MB).' }); return; }
-
-    const client = getClient();
-    const result = await client.imageToImage({
-      model: MODEL,
-      inputs: new Blob([file.buffer], { type: file.mimeType }),
-    });
-    const buf = Buffer.from(await result.arrayBuffer());
-    if (!buf.length) { res.status(502).json({ error: 'Provider returned an empty result.' }); return; }
-    res.setHeader('Content-Type', result.type || 'image/png');
-    res.status(200).send(buf);
-  } catch (err) {
-    const e = toApiError(err);
-    res.status(e.statusCode).json({ error: e.error, detail: e.detail, model: MODEL });
-  }
+  res.status(501).json({
+    available: false,
+    error: 'AI Upscale temporarily unavailable',
+    detail: 'No currently provider-supported Hugging Face model for HD enhancement was found after two real live attempts (swin2SR, AuraSR-v2). This is not attempted with a fake or non-AI result.',
+  });
 }
