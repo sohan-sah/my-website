@@ -1,6 +1,7 @@
 {
   "type": "module",
   "dependencies": {
-    "@huggingface/inference": "^3.0.0"
+    "@huggingface/inference": "^3.0.0",
+    "replicate": "^1.0.0"
   }
 }
