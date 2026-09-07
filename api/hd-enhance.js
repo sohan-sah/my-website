@@ -1,34 +1,36 @@
-// api/hd-enhance.js — HD Enhance (super-resolution / quality enhancement).
-//
-// MODEL AUDIT HISTORY (2 real live failures so far — no more guessing):
-// 1. caidas/swin2SR-classical-sr-x2-64 — failed live: "No Inference
-//    Provider available for model...".
-// 2. fal/AuraSR-v2 — also failed live, same error: "No Inference Provider
-//    available for model fal/AuraSR-v2." (This was a reasonable-looking
-//    candidate — published under fal's own HF org, tagged
-//    super-resolution — but live testing is the only real confirmation,
-//    and it came back negative.)
-//
-// Conclusion: no currently free/serverless-provider-backed plain
-// super-resolution model has been found after two real attempts. Per this
-// task's own explicit instruction, this is honestly reported as
-// unavailable rather than guessing a third model and risking another
-// failed round-trip.
-//
-// Before trying again: check a candidate model's own
-// "Inference Providers" widget on huggingface.co yourself first (Deploy ->
-// Inference Providers on the model page) to confirm a provider is
-// actually listed as live, THEN replace the response below with a real
-// client.imageToImage() call (see api/remove-background.js for the
-// current SDK call pattern).
+// api/hd-enhance.js — HD Enhance via Replicate's nightmareai/real-esrgan
+// (2x upscale + face enhancement), a well-established PAID model — not a
+// Hugging Face free-tier guess. Requires REPLICATE_API_TOKEN with billing
+// configured on the Replicate account.
+// STATUS: real code, UNTESTED (see api/_replicate.js header).
+import { readRawBody, parseMultipartFile } from './_hf.js';
+import { getReplicateClient, runRealEsrgan, toReplicateApiError } from './_replicate.js';
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Use POST with multipart/form-data (field "image").' });
     return;
   }
-  res.status(501).json({
-    available: false,
-    error: 'AI Upscale temporarily unavailable',
-    detail: 'No currently provider-supported Hugging Face model for HD enhancement was found after two real live attempts (swin2SR, AuraSR-v2). This is not attempted with a fake or non-AI result.',
-  });
+  try {
+    const contentType = req.headers['content-type'] || '';
+    if (!contentType.startsWith('multipart/form-data')) {
+      res.status(400).json({ error: 'Expected multipart/form-data with an "image" field.' });
+      return;
+    }
+    const raw = await readRawBody(req);
+    const file = parseMultipartFile(raw, contentType);
+    if (!file.buffer.length) { res.status(400).json({ error: 'Uploaded file is empty.' }); return; }
+    if (file.buffer.length > 10 * 1024 * 1024) { res.status(400).json({ error: 'Image too large (max 10MB).' }); return; }
+
+    const client = getReplicateClient();
+    const outBuf = await runRealEsrgan(client, {
+      imageBuffer: file.buffer, mimeType: file.mimeType, scale: 2, faceEnhance: true,
+    });
+    if (!outBuf.length) { res.status(502).json({ error: 'Provider returned an empty result.' }); return; }
+    res.setHeader('Content-Type', 'image/png');
+    res.status(200).send(outBuf);
+  } catch (err) {
+    const e = toReplicateApiError(err);
+    res.status(e.statusCode).json({ error: e.error, detail: e.detail });
+  }
 }
