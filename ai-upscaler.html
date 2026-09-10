@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>AI Upscaler (Browser)</title>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.webgpu.min.js"></script>
+<style>
+  :root{ --ink:#1c1b19; --paper:#f6f4ee; --line:#dedad0; --accent:#3d5a45; --accent2:#b0521f; --panel:#ffffff; --mut:#8a8578; --bad:#a8402c; }
+  *{box-sizing:border-box;}
+  body{ margin:0; font-family:'Segoe UI',system-ui,sans-serif; background:var(--paper); color:var(--ink); }
+  header{ padding:12px 16px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--paper); z-index:5; }
+  header h1{ font-size:15px; margin:0; font-weight:700; } header h1 span{ color:var(--accent2); }
+  main{ padding:14px; max-width:560px; margin:0 auto; }
+  .notice{ font-size:11.5px; color:var(--mut); background:#f0ede4; border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin-bottom:14px; }
+  .badge-row{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
+  .badge{ font-size:11px; padding:4px 9px; border-radius:12px; border:1px solid var(--line); background:var(--panel); }
+  .badge.on{ background:#dcead8; color:var(--accent); border-color:var(--accent); }
+  .badge.off{ background:#f0ede4; color:var(--mut); }
+  .dropzone{ border:2px dashed var(--line); border-radius:12px; padding:22px 14px; text-align:center; color:var(--mut); margin-bottom:12px; }
+  .dropzone label{ display:inline-block; margin-top:8px; padding:9px 18px; background:var(--accent); color:#fff; border-radius:8px; cursor:pointer; font-size:13.5px; }
+  input[type=file]{ display:none; }
+  .file-preview{ display:none; margin-bottom:12px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px; }
+  .file-preview.show{ display:flex; gap:10px; align-items:center; }
+  .file-preview img{ width:64px; height:64px; object-fit:cover; border-radius:8px; flex-shrink:0; background:#eee; }
+  .file-preview .fp-info{ min-width:0; }
+  .file-preview .fp-name{ font-size:12.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .file-preview .fp-dims{ font-size:11.5px; color:var(--mut); }
+  button.run{ width:100%; padding:11px; background:var(--accent); color:#fff; border:none; border-radius:8px; font-size:14px; cursor:pointer; font-family:inherit; }
+  button.run:disabled{ opacity:.5; cursor:not-allowed; }
+  button.secondary{ width:100%; padding:9px; background:var(--panel); color:var(--ink); border:1px solid var(--line); border-radius:8px; font-size:13px; cursor:pointer; font-family:inherit; margin-top:8px; }
+  .progress-wrap{ margin-top:10px; }
+  .progress-bar{ height:8px; background:#e5e1d5; border-radius:4px; overflow:hidden; }
+  .progress-fill{ height:100%; background:var(--accent); width:0%; transition:width .15s; }
+  .progress-label{ font-size:11.5px; color:var(--mut); margin-top:4px; }
+  .status{ margin-top:10px; font-size:12.5px; padding:8px 10px; border-radius:8px; }
+  .status.info{ background:#f0ede4; color:var(--mut); }
+  .status.error{ background:#f6d9d3; color:var(--bad); }
+  .status.ok{ background:#dcead8; color:var(--accent); }
+  .preview{ display:flex; gap:10px; margin-top:14px; }
+  .preview img{ width:100%; border-radius:8px; border:1px solid var(--line); }
+  .dims{ font-size:11.5px; color:var(--mut); margin-top:6px; }
+  a.download{ display:block; text-align:center; margin-top:10px; padding:9px; background:var(--accent2); color:#fff; border-radius:8px; text-decoration:none; font-size:13px; }
+</style>
+</head>
+<body>
+<header><h1>AI<span>Upscaler</span> <small style="font-size:11px;color:var(--mut)">(runs in your browser)</small></h1></header>
+<main>
+  <div class="notice">Runs entirely on your device — no image is ever uploaded to a server, and no API key is used. First run downloads a small AI model (~5MB) that your browser caches for next time.</div>
+
+  <div class="badge-row" id="badgeRow">
+    <span class="badge" id="badgeWebGPU">Checking WebGPU…</span>
+    <span class="badge" id="badgeModel">Model not loaded</span>
+  </div>
+
+  <div class="dropzone">
+    <div>Upload an image to upscale 2×</div>
+    <label>Choose Image<input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp"></label>
+  </div>
+  <div class="file-preview" id="filePreview"><img id="fpImg"><div class="fp-info"><div class="fp-name" id="fpName"></div><div class="fp-dims" id="fpDims"></div></div></div>
+
+  <button class="run" id="runBtn" disabled>Run AI Upscale (2×)</button>
+  <button class="secondary" id="cancelBtn" style="display:none">Cancel Download</button>
+
+  <div class="progress-wrap" id="progressWrap" style="display:none">
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="progress-label" id="progressLabel"></div>
+  </div>
+
+  <div id="resultArea"></div>
+</main>
+
+<script>
+(() => {
+  const MODEL_URL = 'https://huggingface.co/jonathanst29/tinier-upscale-models/resolve/main/realesr-general-x4v3.onnx';
+  const MAX_INPUT_DIM = 512;
+  const CACHE_NAME = 'ai-upscaler-model-cache-v1';
+
+  let hasWebGPU = false;
+  let session = null;
+  let usedProvider = null;
+  let selectedFile = null;
+  let downloadAbort = null;
+  let busy = false;
+
+  const el = id => document.getElementById(id);
+  function setStatus(msg, kind){ el('resultArea').innerHTML = `<div class="status ${kind}">${escapeHtml(msg)}</div>`; }
+  function escapeHtml(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+  async function detectWebGPU(){
+    if(!('gpu' in navigator)){ return false; }
+    try{
+      const adapter = await navigator.gpu.requestAdapter();
+      return !!adapter;
+    }catch(e){
+      return false;
+    }
+  }
+
+  (async () => {
+    hasWebGPU = await detectWebGPU();
+    const b = el('badgeWebGPU');
+    b.textContent = hasWebGPU ? 'WebGPU available' : 'WebGPU unavailable — will use WASM';
+    b.className = 'badge ' + (hasWebGPU ? 'on' : 'off');
+  })();
+
+  if (window.ort) {
+    ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
+  } else {
+    el('badgeWebGPU').textContent = 'ONNX Runtime failed to load';
+    el('badgeWebGPU').className = 'badge off';
+  }
+
+  el('fileInput').addEventListener('change', async e => {
+    selectedFile = e.target.files[0] || null;
+    el('runBtn').disabled = !selectedFile;
+    el('resultArea').innerHTML = '';
+    if(!selectedFile) { el('filePreview').classList.remove('show'); return; }
+    const dims = await readImageDims(selectedFile);
+    el('fpImg').src = URL.createObjectURL(selectedFile);
+    el('fpName').textContent = selectedFile.name;
+    el('fpDims').textContent = `${dims.w}×${dims.h} · ${(selectedFile.size/1024).toFixed(0)} KB`;
+    el('filePreview').classList.add('show');
+  });
+
+  function readImageDims(fileOrBlob){
+    return new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+      img.onerror = () => resolve({ w:0, h:0 });
+      img.src = URL.createObjectURL(fileOrBlob);
+    });
+  }
+
+  async function loadModel(){
+    if(session) return session;
+    if(!window.ort) throw new Error('ONNX Runtime Web failed to load from the CDN — check your connection.');
+
+    el('progressWrap').style.display = 'block';
+    el('cancelBtn').style.display = 'block';
+    el('progressLabel').textContent = 'Checking local cache…';
+
+    let buf = await getFromCache();
+    if(!buf){
+      buf = await downloadModel((loaded, total) => {
+        const pct = total ? Math.round(loaded/total*100) : 0;
+        el('progressFill').style.width = pct + '%';
+        el('progressLabel').textContent = total
+          ? `Downloading AI model… ${(loaded/1024/1024).toFixed(1)} / ${(total/1024/1024).toFixed(1)} MB`
+          : `Downloading AI model… ${(loaded/1024/1024).toFixed(1)} MB`;
+      });
+      await putInCache(buf);
+    } else {
+      el('progressLabel').textContent = 'Loaded model from browser cache.';
+      el('progressFill').style.width = '100%';
+    }
+
+    el('cancelBtn').style.display = 'none';
+    el('progressLabel').textContent = 'Initializing ' + (hasWebGPU ? 'WebGPU' : 'WASM') + ' execution…';
+
+    try{
+      if(hasWebGPU){
+        session = await ort.InferenceSession.create(buf, { executionProviders: ['webgpu'] });
+        usedProvider = 'webgpu';
+      } else {
+        session = await ort.InferenceSession.create(buf, { executionProviders: ['wasm'] });
+        usedProvider = 'wasm';
+      }
+    } catch(webgpuErr){
+      try{
+        session = await ort.InferenceSession.create(buf, { executionProviders: ['wasm'] });
+        usedProvider = 'wasm (webgpu failed: ' + webgpuErr.message + ')';
+      } catch(wasmErr){
+        throw new Error('Both WebGPU and WASM failed to initialize: ' + wasmErr.message);
+      }
+    }
+
+    el('badgeModel').textContent = 'Model ready (' + usedProvider.split(' ')[0] + ')';
+    el('badgeModel').className = 'badge on';
+    el('progressWrap').style.display = 'none';
+    return session;
+  }
+
+  async function getFromCache(){
+    try{
+      if(!('caches' in window)) return null;
+      const cache = await caches.open(CACHE_NAME);
+      const match = await cache.match(MODEL_URL);
+      if(!match) return null;
+      return await match.arrayBuffer();
+    }catch(e){ return null; }
+  }
+  async function putInCache(buf){
+    try{
+      if(!('caches' in window)) return;
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(MODEL_URL, new Response(buf, { headers: { 'Content-Type': 'application/octet-stream' } }));
+    }catch(e){ }
+  }
+
+  async function downloadModel(onProgress){
+    downloadAbort = new AbortController();
+    const res = await fetch(MODEL_URL, { signal: downloadAbort.signal });
+    if(!res.ok) throw new Error(`Could not download the AI model (HTTP ${res.status}). Check your connection.`);
+    const total = Number(res.headers.get('content-length')) || 0;
+    const reader = res.body.getReader();
+    const chunks = [];
+    let loaded = 0;
+    while(true){
+      const { done, value } = await reader.read();
+      if(done) break;
+      chunks.push(value);
+      loaded += value.length;
+      onProgress(loaded, total);
+    }
+    const buf = new Uint8Array(loaded);
+    let offset = 0;
+    for(const chunk of chunks){ buf.set(chunk, offset); offset += chunk.length; }
+    downloadAbort = null;
+    return buf.buffer;
+  }
+
+  el('cancelBtn').addEventListener('click', () => {
+    if(downloadAbort){ downloadAbort.abort(); }
+    el('progressWrap').style.display = 'none';
+    el('cancelBtn').style.display = 'none';
+    setStatus('Download canceled.', 'info');
+    resetBusy();
+  });
+
+  function preprocessImage(img){
+    let { naturalWidth: w, naturalHeight: h } = img;
+    let scaleDown = 1;
+    if(Math.max(w,h) > MAX_INPUT_DIM){
+      scaleDown = MAX_INPUT_DIM / Math.max(w,h);
+      w = Math.round(w*scaleDown); h = Math.round(h*scaleDown);
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+    const imgData = ctx.getImageData(0,0,w,h).data;
+
+    const chwData = new Float32Array(3*w*h);
+    const plane = w*h;
+    for(let i=0; i<plane; i++){
+      chwData[i]         = imgData[i*4]   / 255;
+      chwData[plane+i]   = imgData[i*4+1] / 255;
+      chwData[plane*2+i] = imgData[i*4+2] / 255;
+    }
+    return { tensorData: chwData, w, h, wasDownscaled: scaleDown < 1 };
+  }
+
+  function tensorToImageData(outputTensor){
+    const dims = outputTensor.dims;
+    const H = dims[2], W = dims[3];
+    const data = outputTensor.data;
+    const plane = H*W;
+    const out = new Uint8ClampedArray(W*H*4);
+    for(let i=0; i<plane; i++){
+      out[i*4]   = clamp255(data[i]         * 255);
+      out[i*4+1] = clamp255(data[plane+i]   * 255);
+      out[i*4+2] = clamp255(data[plane*2+i] * 255);
+      out[i*4+3] = 255;
+    }
+    return new ImageData(out, W, H);
+  }
+  function clamp255(v){ return Math.max(0, Math.min(255, v)); }
+
+  function resetBusy(){
+    busy = false;
+    el('runBtn').disabled = !selectedFile;
+    el('runBtn').textContent = 'Run AI Upscale (2×)';
+  }
+
+  el('runBtn').addEventListener('click', async () => {
+    if(busy || !selectedFile) return;
+    busy = true;
+    el('runBtn').disabled = true;
+    el('runBtn').textContent = 'Working…';
+    setStatus('Loading AI model…', 'info');
+
+    try{
+      const sess = await loadModel();
+
+      setStatus('Preparing image…', 'info');
+      const img = await loadImageEl(selectedFile);
+      const { tensorData, w, h, wasDownscaled } = preprocessImage(img);
+
+      setStatus('Running real AI inference (' + usedProvider.split(' ')[0] + ')…', 'info');
+      const inputName = sess.inputNames[0];
+      const outputName = sess.outputNames[0];
+      const inputTensor = new ort.Tensor('float32', tensorData, [1,3,h,w]);
+
+      let results;
+      try{
+        results = await sess.run({ [inputName]: inputTensor });
+      }catch(runErr){
+        throw classifyRunError(runErr);
+      }
+
+      const outputTensor = results[outputName];
+      const nativeImageData = tensorToImageData(outputTensor);
+
+      const nativeCanvas = document.createElement('canvas');
+      nativeCanvas.width = outputTensor.dims[3]; nativeCanvas.height = outputTensor.dims[2];
+      nativeCanvas.getContext('2d').putImageData(nativeImageData, 0, 0);
+
+      const targetW = w*2, targetH = h*2;
+      const finalCanvas = document.createElement('canvas');
+      finalCanvas.width = targetW; finalCanvas.height = targetH;
+      const fctx = finalCanvas.getContext('2d');
+      fctx.imageSmoothingQuality = 'high';
+      fctx.drawImage(nativeCanvas, 0, 0, targetW, targetH);
+
+      finalCanvas.toBlob(blob => {
+        const url = URL.createObjectURL(blob);
+        const downscaleNote = wasDownscaled
+          ? `<div class="dims">Note: source image was larger than ${MAX_INPUT_DIM}px on its longest side and was downscaled before AI processing (tiling for full-resolution input is planned for a later phase).</div>`
+          : '';
+        document.getElementById('resultArea').innerHTML = `
+          <div class="status ok">Done — real ONNX model inference ran on-device (${usedProvider.split(' ')[0]}).</div>
+          <div class="preview"><img src="${url}"></div>
+          <div class="dims">Input to model: ${w}×${h} → Native AI output (4×): ${outputTensor.dims[3]}×${outputTensor.dims[2]} → Delivered (2×): ${targetW}×${targetH}</div>
+          ${downscaleNote}
+          <a class="download" href="${url}" download="ai-upscaled-2x.png">Download PNG</a>
+        `;
+        resetBusy();
+      }, 'image/png');
+    } catch(err){
+      setStatus('Failed: ' + err.message, 'error');
+      resetBusy();
+    }
+  });
+
+  function loadImageEl(file){
+    return new Promise((resolve,reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Could not decode this image file.'));
+      img.src = URL.createObjectURL(file);
+    });
+  }
+
+  function classifyRunError(err){
+    const msg = (err && err.message) || String(err);
+    if(/out of memory|OOM|allocation failed/i.test(msg)){
+      return new Error('Your device ran out of memory running the model. Try a smaller image or close other tabs, then retry.');
+    }
+    if(/device.*lost|context.*lost/i.test(msg)){
+      return new Error('The GPU context was lost during processing. Please retry — if this keeps happening, your device may not support WebGPU reliably for this model.');
+    }
+    return new Error('Model inference failed: ' + msg);
+  }
+
+  window.__aiUpscalerTestHooks = { detectWebGPU, preprocessImage, tensorToImageData, MAX_INPUT_DIM };
+})();
+</script>
+</body>
+</html>
