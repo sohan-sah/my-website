@@ -73,7 +73,7 @@
 <script>
 (() => {
   const MODEL_URL = 'https://huggingface.co/jonathanst29/tinier-upscale-models/resolve/main/realesr-general-x4v3.onnx';
-  const MAX_INPUT_DIM = 512;
+  const MAX_INPUT_DIM = 768; // raised from 512 — still a safety cap for mobile GPU/WASM memory, but preserves more real detail before AI processing
   const CACHE_NAME = 'ai-upscaler-model-cache-v1';
 
   let hasWebGPU = false;
@@ -229,6 +229,7 @@
   });
 
   function preprocessImage(img){
+    const origW = img.naturalWidth, origH = img.naturalHeight;
     let { naturalWidth: w, naturalHeight: h } = img;
     let scaleDown = 1;
     if(Math.max(w,h) > MAX_INPUT_DIM){
@@ -248,7 +249,7 @@
       chwData[plane+i]   = imgData[i*4+1] / 255;
       chwData[plane*2+i] = imgData[i*4+2] / 255;
     }
-    return { tensorData: chwData, w, h, wasDownscaled: scaleDown < 1 };
+    return { tensorData: chwData, w, h, origW, origH, wasDownscaled: scaleDown < 1 };
   }
 
   function tensorToImageData(outputTensor){
@@ -285,7 +286,7 @@
 
       setStatus('Preparing image…', 'info');
       const img = await loadImageEl(selectedFile);
-      const { tensorData, w, h, wasDownscaled } = preprocessImage(img);
+      const { tensorData, w, h, origW, origH, wasDownscaled } = preprocessImage(img);
 
       setStatus('Running real AI inference (' + usedProvider.split(' ')[0] + ')…', 'info');
       const inputName = sess.inputNames[0];
@@ -306,7 +307,14 @@
       nativeCanvas.width = outputTensor.dims[3]; nativeCanvas.height = outputTensor.dims[2];
       nativeCanvas.getContext('2d').putImageData(nativeImageData, 0, 0);
 
-      const targetW = w*2, targetH = h*2;
+      // Deliver 2× the ORIGINAL photo's dimensions, not 2× the internally
+      // safety-downscaled input — otherwise, for any photo bigger than
+      // MAX_INPUT_DIM (i.e. almost every real phone photo), the result
+      // would end up SMALLER than what was uploaded. The AI detail
+      // synthesis still only "saw" the safety-capped resolution when a
+      // downscale happened, but the delivered size always honestly means
+      // "2× what you gave us."
+      const targetW = origW*2, targetH = origH*2;
       const finalCanvas = document.createElement('canvas');
       finalCanvas.width = targetW; finalCanvas.height = targetH;
       const fctx = finalCanvas.getContext('2d');
@@ -316,12 +324,12 @@
       finalCanvas.toBlob(blob => {
         const url = URL.createObjectURL(blob);
         const downscaleNote = wasDownscaled
-          ? `<div class="dims">Note: source image was larger than ${MAX_INPUT_DIM}px on its longest side and was downscaled before AI processing (tiling for full-resolution input is planned for a later phase).</div>`
+          ? `<div class="dims">Note: your photo (${origW}×${origH}) is larger than the ${MAX_INPUT_DIM}px safety cap, so the AI model only processed a ${w}×${h} version to avoid crashing mobile browsers — real detail synthesis is limited to that resolution, then scaled to match your original size × 2 (tiling for full native-resolution processing is planned for a later phase).</div>`
           : '';
         document.getElementById('resultArea').innerHTML = `
           <div class="status ok">Done — real ONNX model inference ran on-device (${usedProvider.split(' ')[0]}).</div>
           <div class="preview"><img src="${url}"></div>
-          <div class="dims">Input to model: ${w}×${h} → Native AI output (4×): ${outputTensor.dims[3]}×${outputTensor.dims[2]} → Delivered (2×): ${targetW}×${targetH}</div>
+          <div class="dims">Original: ${origW}×${origH} → AI-processed at: ${w}×${h} → Delivered (2× original): ${targetW}×${targetH}</div>
           ${downscaleNote}
           <a class="download" href="${url}" download="ai-upscaled-2x.png">Download PNG</a>
         `;
